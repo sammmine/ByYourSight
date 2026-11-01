@@ -12,13 +12,13 @@ namespace ByYourSight.Safety
     public class ObstacleDetector : MonoBehaviour
     {
         [Header("Hazard Detection Settings (KF07)")]
-        [Tooltip("Hazard warning distance threshold (meters)")]
-        public float hazardWarningDistance = 1.6f;
+        [Tooltip("Hazard warning distance threshold: 1.5m (150 cm per M2/T3 Acceptance Criteria)")]
+        public float hazardWarningDistance = 1.5f;
 
         [Tooltip("SphereCast sweep radius ahead of the user")]
         public float detectionRadius = 0.25f;
 
-        [Tooltip("Check interval (T3 latency target <= 300ms / 0.15s)")]
+        [Tooltip("Check interval: 0.15s / 150ms (T3 latency target < 300ms)")]
         public float checkIntervalSeconds = 0.15f;
 
         [Header("Current Obstacle Status (Read-Only)")]

@@ -29,6 +29,7 @@ namespace ByYourSight.Perception
         private Color _originalColor;
         private float _highlightUntil = 0f;
         private Color _activeHighlightColor;
+        private LineRenderer _outlineBoxRenderer;
 
         // Semantic colors per T3 Design System (HoloLens Additive Display):
         // Yellow = info/target, Red/Orange = hazard, Green = success
@@ -45,6 +46,23 @@ namespace ByYourSight.Perception
                     ? _renderer.material.GetColor("_BaseColor")
                     : _renderer.material.color;
             }
+            SetupThickBoundingBoxOutline();
+        }
+
+        private void SetupThickBoundingBoxOutline()
+        {
+            GameObject outlineObj = new GameObject("T3_BoundingBoxOutline");
+            outlineObj.transform.SetParent(transform, false);
+            _outlineBoxRenderer = outlineObj.AddComponent<LineRenderer>();
+            _outlineBoxRenderer.useWorldSpace = true;
+            _outlineBoxRenderer.loop = false;
+            _outlineBoxRenderer.widthMultiplier = 0.025f; // Thick high-contrast outline per T3 Visual Layer
+            Shader lineShader = Shader.Find("Sprites/Default");
+            if (lineShader != null)
+            {
+                _outlineBoxRenderer.material = new Material(lineShader);
+            }
+            _outlineBoxRenderer.enabled = false;
         }
 
         private void Update()
@@ -60,10 +78,19 @@ namespace ByYourSight.Perception
                 }
             }
 
+            if (_outlineBoxRenderer != null && _outlineBoxRenderer.enabled && _renderer != null)
+            {
+                UpdateBoundingBoxPositions(_renderer.bounds);
+            }
+
             if (_renderer != null && Time.time > _highlightUntil && _highlightUntil > 0f)
             {
                 _highlightUntil = 0f;
                 ApplyColor(_originalColor);
+                if (_outlineBoxRenderer != null)
+                {
+                    _outlineBoxRenderer.enabled = false;
+                }
             }
         }
 
@@ -72,7 +99,43 @@ namespace ByYourSight.Perception
             if (_renderer == null) return;
             _activeHighlightColor = semanticColor;
             ApplyColor(semanticColor);
+            if (_outlineBoxRenderer != null)
+            {
+                _outlineBoxRenderer.startColor = semanticColor;
+                _outlineBoxRenderer.endColor = semanticColor;
+                UpdateBoundingBoxPositions(_renderer.bounds);
+                _outlineBoxRenderer.enabled = true;
+            }
             _highlightUntil = Time.time + duration;
+        }
+
+        private void UpdateBoundingBoxPositions(Bounds b)
+        {
+            Vector3 min = b.min - Vector3.one * 0.03f;
+            Vector3 max = b.max + Vector3.one * 0.03f;
+
+            Vector3[] pts = new Vector3[]
+            {
+                new Vector3(min.x, min.y, min.z),
+                new Vector3(max.x, min.y, min.z),
+                new Vector3(max.x, min.y, max.z),
+                new Vector3(min.x, min.y, max.z),
+                new Vector3(min.x, min.y, min.z),
+                new Vector3(min.x, max.y, min.z),
+                new Vector3(max.x, max.y, min.z),
+                new Vector3(max.x, min.y, min.z),
+                new Vector3(max.x, max.y, min.z),
+                new Vector3(max.x, max.y, max.z),
+                new Vector3(max.x, min.y, max.z),
+                new Vector3(max.x, max.y, max.z),
+                new Vector3(min.x, max.y, max.z),
+                new Vector3(min.x, min.y, max.z),
+                new Vector3(min.x, max.y, max.z),
+                new Vector3(min.x, max.y, min.z)
+            };
+
+            _outlineBoxRenderer.positionCount = pts.Length;
+            _outlineBoxRenderer.SetPositions(pts);
         }
 
         private void ApplyColor(Color c)

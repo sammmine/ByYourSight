@@ -19,7 +19,9 @@ namespace ByYourSight.Perception
         public bool simulateLowLightWarning = false;
 
         [Header("Approaching Person Detection (KF08 - P2)")]
-        public float personDetectionRadius = 4.0f;
+        [Tooltip("Person detection range: 1.0m - 3.0m (100 cm - 300 cm per M2/T3 Acceptance Criteria)")]
+        public float minPersonDetectionDistance = 1.0f;
+        public float personDetectionRadius = 3.0f;
         public float personAlertCooldown = 8.0f;
 
         private readonly Dictionary<TrackableObject, float> _lastPersonAlertTime = new Dictionary<TrackableObject, float>();

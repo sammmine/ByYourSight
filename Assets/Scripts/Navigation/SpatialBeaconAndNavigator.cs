@@ -32,7 +32,8 @@ namespace ByYourSight.Navigation
         public bool isNavigationActive = false;
         public string activeDestinationName = "";
         public int currentWaypointIndex = 0;
-        public float waypointReachThreshold = 1.1f;
+        [Tooltip("Turn instruction trigger distance: 1.0m (100 cm before turn point per M2/T3)")]
+        public float waypointReachThreshold = 1.0f;
         public float navigationInstructionInterval = 3.5f;
         public List<NavigationDestination> destinations = new List<NavigationDestination>();
 
