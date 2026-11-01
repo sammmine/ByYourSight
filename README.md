@@ -131,16 +131,16 @@ Seluruh skrip berada di direktori `Assets/Scripts/`:
 - `Assets/Scripts/Audio/PriorityAudioManager.cs`
   - Mengelola antrian prioritas audio (`P0`–`P3`), *cooldown* alarm bahaya, status *Mute* (KF06), fitur *"Repeat"* & *"Details"*, *synthesizer earcon* prosedural, kalkulasi arah relatif tubuh, serta *engine* TTS *native* UWP & macOS.
 - `Assets/Scripts/Perception/TrackableObject.cs`
-  - Komponen metadata objek (`EverydayObject`, `HazardObstacle`, `Person`) beserta sistem *high-contrast visual highlight* untuk layar *additive* HoloLens.
+  - Komponen metadata objek (`EverydayObject`, `HazardObstacle`, `Person`) beserta sistem *high-contrast visual highlight* dan **3D Thick Bounding Box Outline (`LineRenderer`)** untuk layar *additive* HoloLens.
 - `Assets/Scripts/Perception/ObjectRecognizer.cs`
   - **KF01 (`IdentifyObjectInGaze`):** Mengidentifikasi objek di arah pandang kepala dengan format `[What] + [Distance] + [Direction]`.
   - **KF02 (`SaveCustomObjectInGaze`):** Menyimpan objek di arah pandang dengan label suara kustom milik pengguna.
-  - **KF08 (`MonitorApproachingPeople`):** Mendeteksi orang yang bergerak mendekati pengguna dalam radius 4 meter dan memicu info sosial `P2`.
+  - **KF08 (`MonitorApproachingPeople`):** Mendeteksi orang yang bergerak mendekati pengguna pada jarak `1.0m–3.0m` (`100 cm–300 cm`) dan memicu info sosial `P2`.
 - `Assets/Scripts/Navigation/SpatialBeaconAndNavigator.cs`
   - **KF03 (`StartBeaconForObject` & `UpdateSpatialBeacon`):** Memandu pengguna memutar kepala menuju objek yang dicari menggunakan *3D Spatial Audio Beacon* (frekuensi ketukan makin cepat dan nada makin tinggi saat sudut kepala mendekati 0°, dengan konfirmasi saat masuk toleransi **15°**).
-  - **KF05 (`StartNavigationTo` & `UpdateWaypointNavigation`):** Memandu pengguna berjalan mengikuti rute *waypoint* lokal menuju tujuan (*Door* atau *Desk*) dengan instruksi arah berkala berprioritas `P1`.
+  - **KF05 (`StartNavigationTo` & `UpdateWaypointNavigation`):** Memandu pengguna berjalan mengikuti rute *waypoint* lokal menuju tujuan (*Door* atau *Desk*) dengan instruksi pergantian arah pada jarak `1.0m` (`100 cm`) sebelum titik belok berprioritas `P1`.
 - `Assets/Scripts/Safety/ObstacleDetector.cs`
-  - **KF07 (`CheckObstaclesAhead`):** Melakukan `SphereCast` horizontal setiap `0.15` detik (memenuhi target latensi ≤ 300ms) untuk mendeteksi rintangan bahaya di jalur jalan pengguna dan memicu alarm `P0`.
+  - **KF07 (`CheckObstaclesAhead`):** Melakukan `SphereCast` horizontal setiap `0.15` detik (memenuhi target latensi `< 300ms`) untuk mendeteksi rintangan bahaya pada jarak `< 1.5m` (`150 cm`) di jalur jalan pengguna dan memicu alarm `P0`.
 - `Assets/Scripts/Input/VoiceAndGestureController.cs`
   - **KF04 & KF06:** Mengintegrasikan `KeywordRecognizer` *native* HoloLens 2, memproses perintah suara bahasa Inggris, mengatur adaptasi volume berdasarkan kebisingan lingkungan, dan menyediakan HUD simulator di Unity Editor.
 - `Assets/Scripts/Editor/ByYourSightSceneSetup.cs`

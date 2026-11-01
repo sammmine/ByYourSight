@@ -110,7 +110,7 @@ Kode C# pada proyek ini sudah dirancang agar kompatibel secara *native* ketika d
 3. **Menghubungkan Deteksi Rintangan (KF07) ke Tembok & Tiang Asli:**
    * Saat digunakan di ruangan nyata, Anda dapat menonaktifkan objek lantai/objek dummy (`Indoor_Floor`) di *Hierarchy* agar tidak menghalangi pandangan.
    * Tambahkan komponen **`ARMeshManager`** (dari paket `AR Foundation` yang sudah terinstal) untuk memproyeksikan *Spatial Mesh* beserta `MeshCollider` pada dinding, tiang, meja, dan kursi asli di ruangan.
-   * Skrip `ObstacleDetector.cs` telah dikonfigurasi agar menganggap setiap *collider* struktural tanpa tag khusus (`trackable == null`) sebagai rintangan bahaya (`HazardObstacle`), sehingga akan langsung memicu alarm `P0` (*"Warning!"*) ketika pengguna berjalan mendekati dinding atau tiang nyata dalam jarak `< 1.6 meter`.
+   * Skrip `ObstacleDetector.cs` telah dikonfigurasi agar menganggap setiap *collider* struktural tanpa tag khusus (`trackable == null`) sebagai rintangan bahaya (`HazardObstacle`), sehingga akan langsung memicu alarm `P0` (*"Warning!"*) ketika pengguna berjalan mendekati dinding atau tiang nyata dalam jarak `< 1.5 meter` (`150 cm`).
 4. **Menyembunyikan Panel Simulator Mouse/Keyboard di HoloLens:**
    * Saat dijalankan di HoloLens 2 asli, Anda dapat mematikan centang `enableEditorWalkSimulation` pada komponen `VoiceAndGestureController` di Inspector karena pergerakan kamera sepenuhnya dikendalikan oleh sensor kepala (*Head Tracking*) HoloLens 2.
 
