@@ -51,17 +51,7 @@ namespace ByYourSight.InputSystem
             "Identify",
             "Save object",
             "Save item",
-            "Save water bottle",
-            "Save coffee mug",
-            "Save house keys",
-            "Find water bottle",
-            "Find coffee mug",
-            "Find small box",
-            "Find house keys",
-            "Navigate to door",
-            "Take me to the door",
-            "Navigate to desk",
-            "Take me to the desk",
+            "List saved",
             "Repeat",
             "Details",
             "Mute",
@@ -73,6 +63,34 @@ namespace ByYourSight.InputSystem
             "Help"
         };
 #endif
+
+        [Header("Real-Room Tagging (Save -> Find / Navigate)")]
+        [Tooltip("Labels the user can tag in the real room. Each label generates the voice phrases " +
+                 "\"Save X\", \"Find X\", \"Navigate to X\" and \"Take me to the X\" (KeywordRecognizer needs fixed phrases).")]
+        public List<string> realWorldTagLabels = new List<string>
+        {
+            "door", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
+            "sink", "stairs", "exit", "bag", "phone", "water bottle", "coffee mug",
+            "house keys", "small box"
+        };
+
+        private string[] BuildVoiceVocabulary()
+        {
+            HashSet<string> phrases = new HashSet<string>();
+#if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
+            foreach (string p in _nativeHoloLensKeywords) phrases.Add(p);
+#endif
+            foreach (string raw in realWorldTagLabels)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                string label = raw.Trim().ToLowerInvariant();
+                phrases.Add($"Save {label}");
+                phrases.Add($"Find {label}");
+                phrases.Add($"Navigate to {label}");
+                phrases.Add($"Take me to the {label}");
+            }
+            return new List<string>(phrases).ToArray();
+        }
 
         private void Start()
         {
@@ -115,7 +133,7 @@ namespace ByYourSight.InputSystem
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
             try
             {
-                _keywordRecognizer = new KeywordRecognizer(_nativeHoloLensKeywords, ConfidenceLevel.Medium);
+                _keywordRecognizer = new KeywordRecognizer(BuildVoiceVocabulary(), ConfidenceLevel.Medium);
                 _keywordRecognizer.OnPhraseRecognized += args =>
                 {
                     ProcessVoiceCommand(args.text);
@@ -189,16 +207,26 @@ namespace ByYourSight.InputSystem
             }
 
             // 4. "Save object [label]" (KF02)
-            if (cmd.StartsWith("save object") || cmd.StartsWith("save item") || cmd.StartsWith("save"))
+            if (cmd.StartsWith("save"))
             {
-                string label = rawCommand.Length > 11
-                    ? rawCommand.Substring(rawCommand.ToLowerInvariant().IndexOf("save") + 4)
-                        .Replace("object", "")
-                        .Replace("item", "")
-                        .Trim()
-                    : _customSaveLabel;
+                // "Save door" -> "door", "Save object House Keys" -> "House Keys", "Save object" -> HUD label
+                string label = rawCommand.Trim().Substring(4).Trim();
+                string lowerLabel = label.ToLowerInvariant();
+                if (lowerLabel.StartsWith("object")) label = label.Substring(6).Trim();
+                else if (lowerLabel.StartsWith("item")) label = label.Substring(4).Trim();
                 if (string.IsNullOrEmpty(label)) label = _customSaveLabel;
                 objectRecognizer?.SaveCustomObjectInGaze(label);
+                return;
+            }
+
+            // "List saved": reads back every label the user has tagged in the real room
+            if (cmd == "list saved")
+            {
+                List<string> saved = objectRecognizer != null ? objectRecognizer.GetSavedLabels() : new List<string>();
+                PriorityAudioManager.Instance.EnqueueSpeech(
+                    saved.Count == 0 ? "Nothing saved yet" : "Saved: " + string.Join(", ", saved),
+                    AudioPriority.P3_ObjectIdentity
+                );
                 return;
             }
 
@@ -215,7 +243,7 @@ namespace ByYourSight.InputSystem
                 {
                     PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                     PriorityAudioManager.Instance.EnqueueSpeech(
-                        $"{targetName} not found nearby",
+                        $"{targetName} not saved yet. Look at it and say Save {targetName}",
                         AudioPriority.P3_ObjectIdentity
                     );
                 }
@@ -255,7 +283,7 @@ namespace ByYourSight.InputSystem
             if (cmd == "help")
             {
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Say: What is this, Find item, Navigate to door, or Mute",
+                    "Look at a place and say Save door. Then say Find door, or Navigate to door",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;

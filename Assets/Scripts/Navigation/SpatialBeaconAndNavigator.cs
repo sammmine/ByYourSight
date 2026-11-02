@@ -94,13 +94,35 @@ namespace ByYourSight.Navigation
                 return;
 
             string q = queryDestination.Trim().ToLowerInvariant();
-            NavigationDestination found = destinations.Find(d => d.destinationName.ToLowerInvariant().Contains(q));
+            List<Transform> route = null;
+            string routeName = queryDestination.Trim();
 
-            if (found == null || found.waypoints.Count == 0)
+            // 1. Real room: a place the user tagged with "Save [label]" (straight-line guidance to that tag)
+            ObjectRecognizer recognizer = FindObjectOfType<ObjectRecognizer>();
+            TrackableObject savedTag = recognizer != null ? recognizer.FindObjectByName(q) : null;
+            if (savedTag != null)
+            {
+                route = new List<Transform> { savedTag.transform };
+                routeName = savedTag.labelName;
+            }
+            else
+            {
+                // 2. Simulated room: predefined waypoint graph, only while the simulated room is visible.
+                //    In Real Room mode these waypoints are hidden coordinates that don't match the real room.
+                NavigationDestination found = destinations.Find(d => d.destinationName.ToLowerInvariant().Contains(q));
+                if (found != null && found.waypoints.Count > 0 &&
+                    found.waypoints.TrueForAll(w => w != null && w.gameObject.activeInHierarchy))
+                {
+                    route = new List<Transform>(found.waypoints);
+                    routeName = found.destinationName;
+                }
+            }
+
+            if (route == null)
             {
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Destination {queryDestination} not found",
+                    $"{routeName} not saved yet. Face it and say Save {routeName}",
                     AudioPriority.P1_Navigation
                 );
                 return;
@@ -108,8 +130,8 @@ namespace ByYourSight.Navigation
 
             isBeaconActive = false;
             isNavigationActive = true;
-            activeDestinationName = found.destinationName;
-            _activeRoute = new List<Transform>(found.waypoints);
+            activeDestinationName = routeName;
+            _activeRoute = route;
             currentWaypointIndex = 0;
             _nextNavInstructionTime = Time.time + 0.5f;
 

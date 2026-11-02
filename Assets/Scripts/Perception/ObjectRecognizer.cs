@@ -108,12 +108,13 @@ namespace ByYourSight.Perception
 
             Transform head = Camera.main.transform;
             Ray gazeRay = new Ray(head.position, head.forward);
-            string finalLabel = string.IsNullOrWhiteSpace(customLabel) ? "Saved Item" : customLabel;
+            string finalLabel = string.IsNullOrWhiteSpace(customLabel) ? "Saved Item" : customLabel.Trim();
 
             if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                if (trackable != null)
+                // Relabel simulated objects, but never overwrite another real-room tag the user is looking at
+                if (trackable != null && !IsRealWorldAnchor(trackable))
                 {
                     trackable.labelName = finalLabel;
                     trackable.detailedDescription = $"Personal item saved by user with label {finalLabel}";
@@ -156,10 +157,41 @@ namespace ByYourSight.Perception
             }
         }
 
+        private const string RealWorldAnchorPrefix = "RealWorldAnchor_";
+
+        private static bool IsRealWorldAnchor(TrackableObject t)
+        {
+            return t != null && t.gameObject.name.StartsWith(RealWorldAnchorPrefix);
+        }
+
+        /// <summary>
+        /// Labels of every real-room tag the user has saved this session ("List saved").
+        /// </summary>
+        public List<string> GetSavedLabels()
+        {
+            List<string> labels = new List<string>();
+            foreach (TrackableObject t in FindObjectsOfType<TrackableObject>())
+            {
+                if (IsRealWorldAnchor(t) && !labels.Contains(t.labelName))
+                    labels.Add(t.labelName);
+            }
+            return labels;
+        }
+
         private TrackableObject CreateRealWorldSpatialAnchor(Vector3 worldPos, string label)
         {
+            // Saving the same label again moves the tag instead of creating a duplicate
+            foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
+            {
+                if (IsRealWorldAnchor(existing) &&
+                    string.Equals(existing.labelName, label, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    Destroy(existing.gameObject);
+                }
+            }
+
             GameObject anchorObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            anchorObj.name = $"RealWorldAnchor_{label}";
+            anchorObj.name = RealWorldAnchorPrefix + label;
             anchorObj.transform.position = worldPos;
             anchorObj.transform.localScale = new Vector3(0.22f, 0.22f, 0.22f);
 
