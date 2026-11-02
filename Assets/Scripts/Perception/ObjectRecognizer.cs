@@ -54,35 +54,61 @@ namespace ByYourSight.Perception
             Transform head = Camera.main.transform;
             Ray gazeRay = new Ray(head.position, head.forward);
 
+            TrackableObject detectedTrackable = null;
+            Vector3 hitPoint = Vector3.zero;
+            float hitDistance = 0f;
+            bool hasHit = false;
+
+            // 1. Primary SphereCast along head gaze
             if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
             {
-                TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                string objName = trackable != null ? trackable.labelName : "Object surface";
-                float dist = Mathf.Max(0.5f, Mathf.Round(hit.distance * 2f) / 2f); // Round to nearest 0.5m
+                detectedTrackable = hit.collider.GetComponentInParent<TrackableObject>();
+                hitPoint = hit.point;
+                hitDistance = hit.distance;
+                hasHit = true;
+            }
+
+            // 2. Fallback Wide Gaze Cone (28 degrees) so HoloLens users don't miss objects due to slight head pitch differences
+            if (detectedTrackable == null)
+            {
+                TrackableObject coneMatch = FindBestObjectInGazeCone(head, maxGazeDistance, 28f);
+                if (coneMatch != null)
+                {
+                    detectedTrackable = coneMatch;
+                    hitPoint = coneMatch.transform.position;
+                    hitDistance = Vector3.Distance(head.position, hitPoint);
+                    hasHit = true;
+                }
+            }
+
+            if (hasHit)
+            {
+                string objName = detectedTrackable != null ? detectedTrackable.labelName : "Object surface";
+                float dist = Mathf.Max(0.5f, Mathf.Round(hitDistance * 2f) / 2f); // Round to nearest 0.5m
                 string distText = Mathf.Approximately(dist, 1f)
                     ? "1 meter"
                     : (dist % 1f == 0f ? $"{(int)dist} meters" : $"{dist:0.0} meters");
-                string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, hit.point);
+                string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, hitPoint);
 
                 string shortMsg = $"{objName}, {distText}, {dirText}";
-                string detailMsg = trackable != null && !string.IsNullOrEmpty(trackable.detailedDescription)
-                    ? $"{objName}, {distText} {dirText}. {trackable.detailedDescription}"
+                string detailMsg = detectedTrackable != null && !string.IsNullOrEmpty(detectedTrackable.detailedDescription)
+                    ? $"{objName}, {distText} {dirText}. {detectedTrackable.detailedDescription}"
                     : $"{objName} detected at {distText} {dirText}";
 
-                if (trackable != null)
+                if (detectedTrackable != null)
                 {
-                    trackable.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.0f);
+                    detectedTrackable.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.5f);
                 }
                 else
                 {
-                    SpawnTemporaryRealWorldHighlightBox(hit.point, TrackableObject.HighContrastYellow, 3.0f);
+                    SpawnTemporaryRealWorldHighlightBox(hitPoint, TrackableObject.HighContrastYellow, 3.5f);
                 }
 
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
+                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hitPoint);
                 PriorityAudioManager.Instance.EnqueueSpeech(
                     shortMsg,
                     AudioPriority.P3_ObjectIdentity,
-                    hit.point,
+                    hitPoint,
                     detailMsg
                 );
             }
@@ -94,6 +120,33 @@ namespace ByYourSight.Perception
                     AudioPriority.P3_ObjectIdentity
                 );
             }
+        }
+
+        private TrackableObject FindBestObjectInGazeCone(Transform head, float maxDist, float maxAngleDegrees)
+        {
+            TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
+            TrackableObject best = null;
+            float bestAngle = maxAngleDegrees;
+
+            foreach (var obj in allObjects)
+            {
+                if (obj == null || !obj.gameObject.activeInHierarchy)
+                    continue;
+
+                Vector3 toObj = obj.transform.position - head.position;
+                float dist = toObj.magnitude;
+                if (dist > maxDist || dist < 0.2f)
+                    continue;
+
+                float angle = Vector3.Angle(head.forward, toObj.normalized);
+                if (angle < bestAngle)
+                {
+                    bestAngle = angle;
+                    best = obj;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>

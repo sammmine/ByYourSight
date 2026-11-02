@@ -40,6 +40,7 @@ namespace ByYourSight.InputSystem
 
         private float _yaw = 0f;
         private float _pitch = 0f;
+        private bool _hasCalibratedToHoloLensHead = false;
         private string _customCommandInput = "Find Water bottle";
         private string _customSaveLabel = "House Keys";
 
@@ -62,6 +63,8 @@ namespace ByYourSight.InputSystem
             "Take me to the door",
             "Navigate to desk",
             "Take me to the desk",
+            "Calibrate",
+            "Reset view",
             "Repeat",
             "Details",
             "Mute",
@@ -91,11 +94,7 @@ namespace ByYourSight.InputSystem
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || WINDOWS_UWP
             isRealHoloLensRoomMode = true;
 #endif
-            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
-            if (simEnv != null && isRealHoloLensRoomMode)
-            {
-                simEnv.SetActive(false);
-            }
+            ApplyHoloLensVisualMode();
 
             InitializeNativeHoloLensSpeech();
 
@@ -244,7 +243,14 @@ namespace ByYourSight.InputSystem
                 return;
             }
 
-            // 8. "Cancel" / "Stop"
+            // 8. "Calibrate" / "Reset view"
+            if (cmd == "calibrate" || cmd == "reset view")
+            {
+                CalibrateEnvironmentToUserHead(announce: true);
+                return;
+            }
+
+            // 9. "Cancel" / "Stop"
             if (cmd == "cancel" || cmd == "stop")
             {
                 navigator?.StopAllGuidance(announce: true);
@@ -293,13 +299,20 @@ namespace ByYourSight.InputSystem
                 InputDevice headDevice = InputDevices.GetDeviceAtXRNode(XRNode.CenterEye);
                 if (headDevice.isValid)
                 {
-                    if (headDevice.TryGetFeatureValue(CommonUsages.centerEyePosition, out Vector3 headPos))
+                    bool gotPos = headDevice.TryGetFeatureValue(CommonUsages.centerEyePosition, out Vector3 headPos);
+                    bool gotRot = headDevice.TryGetFeatureValue(CommonUsages.centerEyeRotation, out Quaternion headRot);
+                    if (gotPos)
                     {
                         cam.localPosition = headPos;
                     }
-                    if (headDevice.TryGetFeatureValue(CommonUsages.centerEyeRotation, out Quaternion headRot))
+                    if (gotRot)
                     {
                         cam.localRotation = headRot;
+                    }
+                    if (!_hasCalibratedToHoloLensHead && (gotPos || gotRot) && Time.timeSinceLevelLoad > 0.5f)
+                    {
+                        _hasCalibratedToHoloLensHead = true;
+                        CalibrateEnvironmentToUserHead(announce: false);
                     }
                 }
             }
@@ -344,18 +357,71 @@ namespace ByYourSight.InputSystem
         public void ToggleRealHoloLensRoomMode()
         {
             isRealHoloLensRoomMode = !isRealHoloLensRoomMode;
-            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
-            if (simEnv != null)
-            {
-                simEnv.SetActive(!isRealHoloLensRoomMode);
-            }
+            ApplyHoloLensVisualMode();
 
             if (PriorityAudioManager.Instance != null)
             {
                 string modeMsg = isRealHoloLensRoomMode
-                    ? "Real room spatial scan active"
-                    : "Simulation room active";
+                    ? "Real room AR mode active"
+                    : "Simulation solid meshes active";
                 PriorityAudioManager.Instance.EnqueueSpeech(modeMsg, AudioPriority.P3_ObjectIdentity);
+            }
+        }
+
+        private void ApplyHoloLensVisualMode()
+        {
+            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
+            if (simEnv == null)
+                return;
+
+            // Keep simEnv active so all TrackableObject colliders work in the real room!
+            simEnv.SetActive(true);
+
+            // Hide the fake grey floor in Real HoloLens Room mode
+            Transform floor = simEnv.transform.Find("Indoor_Floor");
+            if (floor != null)
+            {
+                floor.gameObject.SetActive(!isRealHoloLensRoomMode);
+            }
+
+            // In Real HoloLens Room mode, hide solid primitive MeshRenderers so only 3D AR Wireframe Bounding Boxes appear over the real lab!
+            TrackableObject[] trackables = simEnv.GetComponentsInChildren<TrackableObject>(true);
+            foreach (var t in trackables)
+            {
+                MeshRenderer mr = t.GetComponent<MeshRenderer>();
+                if (mr != null)
+                {
+                    mr.enabled = !isRealHoloLensRoomMode;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Aligns the spatial object anchors around the user's current real-world HoloLens head position and facing direction.
+        /// Originally designed for a user at (0, 1.6, -3.5) facing +Z.
+        /// </summary>
+        public void CalibrateEnvironmentToUserHead(bool announce = true)
+        {
+            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
+            if (simEnv == null || Camera.main == null)
+                return;
+
+            Transform head = Camera.main.transform;
+            Vector3 flatForward = new Vector3(head.forward.x, 0f, head.forward.z);
+            if (flatForward.sqrMagnitude < 0.001f)
+                flatForward = Vector3.forward;
+            flatForward.Normalize();
+
+            Quaternion targetRot = Quaternion.LookRotation(flatForward, Vector3.up);
+            Vector3 defaultCamLocal = new Vector3(0f, 1.6f, -3.5f);
+
+            simEnv.transform.rotation = targetRot;
+            simEnv.transform.position = head.position - (targetRot * defaultCamLocal);
+
+            if (announce && PriorityAudioManager.Instance != null)
+            {
+                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success);
+                PriorityAudioManager.Instance.EnqueueSpeech("Calibrated to your view", AudioPriority.P3_ObjectIdentity);
             }
         }
 
@@ -379,10 +445,16 @@ namespace ByYourSight.InputSystem
                 ProcessVoiceCommand(nextMute ? "Mute" : "Resume");
             }
 
-            // 'R' key toggles between Real HoloLens Room (Spatial Mesh) vs Simulated Room
+            // 'R' key toggles between Real HoloLens Room (AR Wireframe Only) vs Simulated Solid Room
             if (Input.GetKeyDown(KeyCode.R))
             {
                 ToggleRealHoloLensRoomMode();
+            }
+
+            // 'C' key calibrates/recenters object anchors in front of current HoloLens head position
+            if (Input.GetKeyDown(KeyCode.C))
+            {
+                CalibrateEnvironmentToUserHead(announce: true);
             }
         }
 
@@ -439,11 +511,16 @@ namespace ByYourSight.InputSystem
             GUILayout.BeginArea(new Rect(16, 80, 340, 580), "By Your Sight — HoloLens Native (EN)", GUI.skin.window);
 
             string modeLabel = isRealHoloLensRoomMode
-                ? "[R] Mode: REAL HOLOLENS ROOM (Click for Sim)"
-                : "[R] Mode: SIMULATED ROOM (Click for Real Room)";
+                ? "[R] Mode: REAL HOLOLENS AR (Wireframe Only)"
+                : "[R] Mode: SIMULATED ROOM (Solid Shapes)";
             if (GUILayout.Button(modeLabel))
             {
                 ToggleRealHoloLensRoomMode();
+            }
+
+            if (GUILayout.Button("[C] Calibrate / Center Objects to HoloLens View"))
+            {
+                CalibrateEnvironmentToUserHead(announce: true);
             }
 
             GUILayout.Label("Walk: WASD | Turn Head: HoloLens or Q/E/Right-Click");

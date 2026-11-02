@@ -245,9 +245,9 @@ namespace ByYourSight.EditorTools
             controller.obstacleDetector = obstacleDetector;
 
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
-            // On Windows (HoloLens 2 lab PC), default to Real-World HoloLens Mode (hide fake MacBook objects!)
+            // On Windows (HoloLens 2 lab PC), default to Real-World HoloLens AR Mode (keep colliders active, hide fake floor)
             controller.isRealHoloLensRoomMode = true;
-            envRoot.SetActive(false);
+            floor.SetActive(false);
 #endif
 
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());

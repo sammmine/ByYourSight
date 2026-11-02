@@ -26,6 +26,7 @@ namespace ByYourSight.Perception
         public float approachSpeed = 0.8f;
 
         private Renderer _renderer;
+        private Collider _collider;
         private Color _originalColor;
         private float _highlightUntil = 0f;
         private Color _activeHighlightColor;
@@ -40,6 +41,7 @@ namespace ByYourSight.Perception
         private void Awake()
         {
             _renderer = GetComponentInChildren<Renderer>();
+            _collider = GetComponentInChildren<Collider>();
             if (_renderer != null && _renderer.material != null)
             {
                 _originalColor = _renderer.material.HasProperty("_BaseColor")
@@ -78,12 +80,12 @@ namespace ByYourSight.Perception
                 }
             }
 
-            if (_outlineBoxRenderer != null && _outlineBoxRenderer.enabled && _renderer != null)
+            if (_outlineBoxRenderer != null && _outlineBoxRenderer.enabled)
             {
-                UpdateBoundingBoxPositions(_renderer.bounds);
+                UpdateBoundingBoxPositions(GetObjectBounds());
             }
 
-            if (_renderer != null && Time.time > _highlightUntil && _highlightUntil > 0f)
+            if (Time.time > _highlightUntil && _highlightUntil > 0f)
             {
                 _highlightUntil = 0f;
                 ApplyColor(_originalColor);
@@ -96,17 +98,25 @@ namespace ByYourSight.Perception
 
         public void TriggerVisualHighlight(Color semanticColor, float duration = 2.0f)
         {
-            if (_renderer == null) return;
             _activeHighlightColor = semanticColor;
             ApplyColor(semanticColor);
             if (_outlineBoxRenderer != null)
             {
                 _outlineBoxRenderer.startColor = semanticColor;
                 _outlineBoxRenderer.endColor = semanticColor;
-                UpdateBoundingBoxPositions(_renderer.bounds);
+                UpdateBoundingBoxPositions(GetObjectBounds());
                 _outlineBoxRenderer.enabled = true;
             }
             _highlightUntil = Time.time + duration;
+        }
+
+        private Bounds GetObjectBounds()
+        {
+            if (_collider != null)
+                return _collider.bounds;
+            if (_renderer != null)
+                return _renderer.bounds;
+            return new Bounds(transform.position, transform.lossyScale);
         }
 
         private void UpdateBoundingBoxPositions(Bounds b)
