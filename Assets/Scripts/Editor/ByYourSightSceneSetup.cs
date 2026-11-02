@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using ByYourSight.Audio;
@@ -59,6 +60,12 @@ namespace ByYourSight.EditorTools
             if (existingSystem != null)
             {
                 Object.DestroyImmediate(existingSystem);
+            }
+
+            GameObject existingMesh = GameObject.Find("HoloLens_RealWorldSpatialMesh");
+            if (existingMesh != null)
+            {
+                Object.DestroyImmediate(existingMesh);
             }
 
             // 1. Position Main Camera at human eye level (1.6m)
@@ -215,8 +222,24 @@ namespace ByYourSight.EditorTools
                 arSessionObj.AddComponent<ARInputManager>();
             }
 
+            // AR Foundation 5 requires ARMeshManager (and the tracked camera) to live under an XR Origin,
+            // otherwise no Spatial Mesh chunks are spawned on the real HoloLens 2 / Holographic Remoting.
+            XROrigin xrOrigin = Object.FindObjectOfType<XROrigin>();
+            if (xrOrigin == null)
+            {
+                GameObject originObj = new GameObject("XR Origin (HoloLens 2)");
+                xrOrigin = originObj.AddComponent<XROrigin>();
+                GameObject offsetObj = new GameObject("Camera Offset");
+                offsetObj.transform.SetParent(originObj.transform, false);
+                xrOrigin.CameraFloorOffsetObject = offsetObj;
+                xrOrigin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Device;
+                xrOrigin.CameraYOffset = 0f;
+            }
+            mainCam.transform.SetParent(xrOrigin.CameraFloorOffsetObject.transform, true);
+            xrOrigin.Camera = mainCam;
+
             GameObject meshManagerObj = new GameObject("HoloLens_RealWorldSpatialMesh");
-            meshManagerObj.transform.SetParent(coreSys.transform);
+            meshManagerObj.transform.SetParent(xrOrigin.transform, false);
             ARMeshManager meshManager = meshManagerObj.AddComponent<ARMeshManager>();
 
             // Create a runtime Spatial Mesh template with MeshFilter + MeshCollider for real-world obstacle raycasting
