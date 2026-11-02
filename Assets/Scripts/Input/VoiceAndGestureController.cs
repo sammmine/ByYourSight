@@ -51,6 +51,9 @@ namespace ByYourSight.InputSystem
             "Identify",
             "Save object",
             "Save item",
+            "Save water bottle",
+            "Save coffee mug",
+            "Save house keys",
             "Find water bottle",
             "Find coffee mug",
             "Find small box",
@@ -79,9 +82,19 @@ namespace ByYourSight.InputSystem
 
             if (Camera.main != null)
             {
+                Camera.main.backgroundColor = new Color(0f, 0f, 0f, 0f);
                 Vector3 euler = Camera.main.transform.eulerAngles;
                 _yaw = euler.y;
                 _pitch = euler.x;
+            }
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || WINDOWS_UWP
+            isRealHoloLensRoomMode = true;
+#endif
+            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
+            if (simEnv != null && isRealHoloLensRoomMode)
+            {
+                simEnv.SetActive(false);
             }
 
             InitializeNativeHoloLensSpeech();

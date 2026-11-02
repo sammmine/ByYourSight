@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
-#if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
+#if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX || UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
 using System.Diagnostics;
 #endif
 #if WINDOWS_UWP
@@ -210,6 +211,8 @@ namespace ByYourSight.Audio
 
 #if WINDOWS_UWP
             SpeakWithHoloLensNativeUWP(req.Text);
+#elif UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            SpeakWithWindowsHolographicRemoting(req.Text);
 #elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
             SpeakWithMacOSEnglish(req.Text);
 #endif
@@ -386,27 +389,97 @@ namespace ByYourSight.Audio
                 UnityEngine.Debug.LogWarning("HoloLens Native UWP TTS error: " + e.Message);
             }
         }
+#endif
 
         private AudioClip ConvertWavBytesToAudioClip(byte[] wavBytes)
         {
             if (wavBytes == null || wavBytes.Length <= 44)
                 return null;
 
-            int channels = BitConverter.ToInt16(wavBytes, 22);
-            int sampleRate = BitConverter.ToInt32(wavBytes, 24);
-            int dataOffset = 44;
-            int sampleCount = (wavBytes.Length - dataOffset) / 2;
-            float[] samples = new float[sampleCount];
+            int channels = Mathf.Max(1, BitConverter.ToInt16(wavBytes, 22));
+            int sampleRate = Mathf.Max(8000, BitConverter.ToInt32(wavBytes, 24));
+            int bitsPerSample = BitConverter.ToInt16(wavBytes, 34);
 
+            // Locate the 'data' chunk in the WAV header
+            int dataOffset = 12;
+            while (dataOffset + 8 < wavBytes.Length)
+            {
+                string chunkId = System.Text.Encoding.ASCII.GetString(wavBytes, dataOffset, 4);
+                int chunkSize = BitConverter.ToInt32(wavBytes, dataOffset + 4);
+                if (chunkId == "data")
+                {
+                    dataOffset += 8;
+                    break;
+                }
+                dataOffset += 8 + chunkSize;
+            }
+
+            if (dataOffset >= wavBytes.Length)
+                dataOffset = 44;
+
+            int bytesPerSample = Mathf.Max(2, bitsPerSample / 8);
+            int sampleCount = (wavBytes.Length - dataOffset) / bytesPerSample;
+            if (sampleCount <= 0)
+                return null;
+
+            float[] samples = new float[sampleCount];
             for (int i = 0; i < sampleCount; i++)
             {
-                short sample = BitConverter.ToInt16(wavBytes, dataOffset + i * 2);
+                short sample = BitConverter.ToInt16(wavBytes, dataOffset + i * bytesPerSample);
                 samples[i] = sample / 32768f;
             }
 
-            AudioClip clip = AudioClip.Create("HoloLensNativeTTS", sampleCount / Mathf.Max(1, channels), Mathf.Max(1, channels), sampleRate, false);
+            AudioClip clip = AudioClip.Create("NativeTTSClip", sampleCount / channels, channels, sampleRate, false);
             clip.SetData(samples, 0);
             return clip;
+        }
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+        /// <summary>
+        /// Synthesizes English speech on Windows using System.Speech into a WAV AudioClip
+        /// and plays it directly through Unity's 3D AudioSource so Holographic Remoting streams
+        /// the spatial voice directly to the HoloLens 2 speakers!
+        /// </summary>
+        private void SpeakWithWindowsHolographicRemoting(string text)
+        {
+            try
+            {
+                string clean = text.Replace("\"", "").Replace("'", "");
+                string tempWav = Path.Combine(Application.temporaryCachePath, "hololens_tts.wav");
+                if (File.Exists(tempWav))
+                {
+                    File.Delete(tempWav);
+                }
+
+                string psScript = $"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = 1; $s.SetOutputToWaveFile('{tempWav}'); $s.Speak('{clean}'); $s.Dispose()";
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -NonInteractive -WindowStyle Hidden -Command \"{psScript}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                Process proc = Process.Start(psi);
+                if (proc != null)
+                {
+                    proc.WaitForExit(1800);
+                }
+
+                if (File.Exists(tempWav))
+                {
+                    byte[] wavBytes = File.ReadAllBytes(tempWav);
+                    AudioClip ttsClip = ConvertWavBytesToAudioClip(wavBytes);
+                    if (ttsClip != null && _spatialVoiceSource != null)
+                    {
+                        _spatialVoiceSource.PlayOneShot(ttsClip, adaptiveVolumeMultiplier);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogWarning("Windows TTS failed: " + e.Message);
+            }
         }
 #endif
 

@@ -73,7 +73,7 @@ namespace ByYourSight.EditorTools
             mainCam.transform.position = new Vector3(0f, 1.6f, -3.5f);
             mainCam.transform.rotation = Quaternion.Euler(0f, 0f, 0f);
             mainCam.clearFlags = CameraClearFlags.SolidColor;
-            mainCam.backgroundColor = new Color(0.06f, 0.07f, 0.1f, 1f); // Dark background so HoloLens high-contrast highlights stand out
+            mainCam.backgroundColor = new Color(0f, 0f, 0f, 0f); // Pure transparent black (0,0,0,0) for HoloLens 2 additive lens!
 
             // 2. Create Indoor Room Environment Root
             GameObject envRoot = new GameObject("ByYourSight_PrototypeEnvironment");
@@ -243,6 +243,12 @@ namespace ByYourSight.EditorTools
             controller.objectRecognizer = recognizer;
             controller.navigator = navigator;
             controller.obstacleDetector = obstacleDetector;
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            // On Windows (HoloLens 2 lab PC), default to Real-World HoloLens Mode (hide fake MacBook objects!)
+            controller.isRealHoloLensRoomMode = true;
+            envRoot.SetActive(false);
+#endif
 
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
             EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene());

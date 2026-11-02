@@ -83,6 +83,10 @@ namespace ByYourSight.Safety
                 {
                     trackable.TriggerVisualHighlight(TrackableObject.HighContrastRedOrange, 1.0f);
                 }
+                else
+                {
+                    ObjectRecognizer.SpawnTemporaryRealWorldHighlightBox(hit.point, TrackableObject.HighContrastRedOrange, 1.2f);
+                }
 
                 // Trigger P0 alarm if the user is moving toward the hazard or very close
                 bool isMoving = moveDelta.magnitude > 0.002f;

@@ -57,7 +57,7 @@ namespace ByYourSight.Perception
             if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                string objName = trackable != null ? trackable.labelName : hit.collider.gameObject.name;
+                string objName = trackable != null ? trackable.labelName : "Object surface";
                 float dist = Mathf.Max(0.5f, Mathf.Round(hit.distance * 2f) / 2f); // Round to nearest 0.5m
                 string distText = Mathf.Approximately(dist, 1f)
                     ? "1 meter"
@@ -67,11 +67,15 @@ namespace ByYourSight.Perception
                 string shortMsg = $"{objName}, {distText}, {dirText}";
                 string detailMsg = trackable != null && !string.IsNullOrEmpty(trackable.detailedDescription)
                     ? $"{objName}, {distText} {dirText}. {trackable.detailedDescription}"
-                    : shortMsg;
+                    : $"{objName} detected at {distText} {dirText}";
 
                 if (trackable != null)
                 {
                     trackable.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.0f);
+                }
+                else
+                {
+                    SpawnTemporaryRealWorldHighlightBox(hit.point, TrackableObject.HighContrastYellow, 3.0f);
                 }
 
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
@@ -93,7 +97,8 @@ namespace ByYourSight.Perception
         }
 
         /// <summary>
-        /// KF02: Captures/saves the object in front of the user with a custom voice label.
+        /// KF02: Captures/saves the real-world object in front of the user with a custom voice label
+        /// and anchors a 3D wireframe bounding box at its real-world 3D position.
         /// Triggered when the user says "Save object [label]".
         /// </summary>
         public void SaveCustomObjectInGaze(string customLabel)
@@ -103,35 +108,105 @@ namespace ByYourSight.Perception
 
             Transform head = Camera.main.transform;
             Ray gazeRay = new Ray(head.position, head.forward);
+            string finalLabel = string.IsNullOrWhiteSpace(customLabel) ? "Saved Item" : customLabel;
 
             if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                if (trackable == null)
+                if (trackable != null)
                 {
-                    trackable = hit.collider.gameObject.AddComponent<TrackableObject>();
+                    trackable.labelName = finalLabel;
+                    trackable.detailedDescription = $"Personal item saved by user with label {finalLabel}";
+                    trackable.isCustomUserSaved = true;
+                    trackable.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 4.0f);
+
+                    PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
+                    PriorityAudioManager.Instance.EnqueueSpeech(
+                        $"Saved, {trackable.labelName}",
+                        AudioPriority.P3_ObjectIdentity,
+                        hit.point
+                    );
+                    return;
                 }
 
-                trackable.labelName = string.IsNullOrWhiteSpace(customLabel) ? "Saved Item" : customLabel;
-                trackable.detailedDescription = $"Personal item saved by user with label {trackable.labelName}";
-                trackable.isCustomUserSaved = true;
-                trackable.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 3.0f);
+                // Hit real-world Spatial Mesh: spawn a real-world 3D bounding box anchor at hit.point!
+                TrackableObject anchored = CreateRealWorldSpatialAnchor(hit.point, finalLabel);
+                anchored.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 4.0f);
 
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Saved, {trackable.labelName}",
+                    $"Saved, {anchored.labelName}",
                     AudioPriority.P3_ObjectIdentity,
                     hit.point
                 );
             }
             else
             {
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
+                // Even if Spatial Mesh hasn't meshed a small tabletop object yet, anchor at 1.2m along real head gaze!
+                Vector3 realWorldAnchorPos = head.position + head.forward * 1.2f;
+                TrackableObject anchored = CreateRealWorldSpatialAnchor(realWorldAnchorPos, finalLabel);
+                anchored.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 4.0f);
+
+                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, realWorldAnchorPos);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Point your head at an object first",
-                    AudioPriority.P3_ObjectIdentity
+                    $"Saved, {anchored.labelName}, 1 meter ahead",
+                    AudioPriority.P3_ObjectIdentity,
+                    realWorldAnchorPos
                 );
             }
+        }
+
+        private TrackableObject CreateRealWorldSpatialAnchor(Vector3 worldPos, string label)
+        {
+            GameObject anchorObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            anchorObj.name = $"RealWorldAnchor_{label}";
+            anchorObj.transform.position = worldPos;
+            anchorObj.transform.localScale = new Vector3(0.22f, 0.22f, 0.22f);
+
+            // Make the inner cube nearly transparent so only the thick 3D wireframe bounding box shows in HoloLens
+            Renderer r = anchorObj.GetComponent<Renderer>();
+            if (r != null)
+            {
+                Shader shader = Shader.Find("Sprites/Default");
+                if (shader != null)
+                {
+                    Material m = new Material(shader);
+                    m.color = new Color(0.15f, 1f, 0.35f, 0.15f);
+                    r.sharedMaterial = m;
+                }
+            }
+
+            TrackableObject trackable = anchorObj.AddComponent<TrackableObject>();
+            trackable.labelName = label;
+            trackable.detailedDescription = $"Real-world anchored object ({label})";
+            trackable.category = SemanticObjectCategory.EverydayObject;
+            trackable.isCustomUserSaved = true;
+            return trackable;
+        }
+
+        public static void SpawnTemporaryRealWorldHighlightBox(Vector3 worldPos, Color color, float duration)
+        {
+            GameObject boxObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            boxObj.name = "RealWorldHighlightMarker";
+            Destroy(boxObj.GetComponent<Collider>());
+            boxObj.transform.position = worldPos;
+            boxObj.transform.localScale = new Vector3(0.25f, 0.25f, 0.25f);
+
+            Renderer r = boxObj.GetComponent<Renderer>();
+            if (r != null)
+            {
+                Shader shader = Shader.Find("Sprites/Default");
+                if (shader != null)
+                {
+                    Material m = new Material(shader);
+                    m.color = new Color(color.r, color.g, color.b, 0.18f);
+                    r.sharedMaterial = m;
+                }
+            }
+
+            TrackableObject t = boxObj.AddComponent<TrackableObject>();
+            t.TriggerVisualHighlight(color, duration);
+            Destroy(boxObj, duration + 0.1f);
         }
 
         /// <summary>
