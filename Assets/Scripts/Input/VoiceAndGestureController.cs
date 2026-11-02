@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.XR;
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
 using UnityEngine.Windows.Speech;
 #endif
@@ -30,7 +31,9 @@ namespace ByYourSight.InputSystem
         [Range(0f, 1f)]
         public float simulatedAmbientNoiseLevel = 0.2f;
 
-        [Header("Unity Editor Walk & Gaze Simulation (WASD + Right Mouse / Q & E)")]
+        [Header("HoloLens 2 Real-World Mode vs Editor Simulation")]
+        [Tooltip("If true, hides the dummy floor & simulated obstacles so HoloLens scans the real physical room via Spatial Mesh.")]
+        public bool isRealHoloLensRoomMode = false;
         public bool enableEditorWalkSimulation = true;
         public float walkSpeed = 2.2f;
         public float mouseLookSensitivity = 2.2f;
@@ -266,12 +269,32 @@ namespace ByYourSight.InputSystem
 
         private void HandleEditorWalkAndLook()
         {
-            if (!enableEditorWalkSimulation || Camera.main == null)
+            if (Camera.main == null)
                 return;
 
             Transform cam = Camera.main.transform;
 
-            // Hold right mouse button to rotate head gaze
+            // 1. If HoloLens 2 (OpenXR / Holographic Remoting) is connected, apply real 6DoF head tracking!
+            if (XRSettings.isDeviceActive)
+            {
+                InputDevice headDevice = InputDevices.GetDeviceAtXRNode(XRNode.CenterEye);
+                if (headDevice.isValid)
+                {
+                    if (headDevice.TryGetFeatureValue(CommonUsages.centerEyePosition, out Vector3 headPos))
+                    {
+                        cam.localPosition = headPos;
+                    }
+                    if (headDevice.TryGetFeatureValue(CommonUsages.centerEyeRotation, out Quaternion headRot))
+                    {
+                        cam.localRotation = headRot;
+                    }
+                }
+            }
+
+            if (!enableEditorWalkSimulation)
+                return;
+
+            // Hold right mouse button to rotate head gaze (only when not overridden by active XR headset)
             if (Input.GetMouseButton(1))
             {
                 _yaw += Input.GetAxis("Mouse X") * mouseLookSensitivity * 2.5f;
@@ -305,6 +328,24 @@ namespace ByYourSight.InputSystem
             }
         }
 
+        public void ToggleRealHoloLensRoomMode()
+        {
+            isRealHoloLensRoomMode = !isRealHoloLensRoomMode;
+            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
+            if (simEnv != null)
+            {
+                simEnv.SetActive(!isRealHoloLensRoomMode);
+            }
+
+            if (PriorityAudioManager.Instance != null)
+            {
+                string modeMsg = isRealHoloLensRoomMode
+                    ? "Real room spatial scan active"
+                    : "Simulation room active";
+                PriorityAudioManager.Instance.EnqueueSpeech(modeMsg, AudioPriority.P3_ObjectIdentity);
+            }
+        }
+
         private void HandleKeyboardShortcuts()
         {
             // Quick keyboard shortcuts for demo & usability testing
@@ -323,6 +364,12 @@ namespace ByYourSight.InputSystem
             {
                 bool nextMute = !PriorityAudioManager.Instance.isMuted;
                 ProcessVoiceCommand(nextMute ? "Mute" : "Resume");
+            }
+
+            // 'R' key toggles between Real HoloLens Room (Spatial Mesh) vs Simulated Room
+            if (Input.GetKeyDown(KeyCode.R))
+            {
+                ToggleRealHoloLensRoomMode();
             }
         }
 
@@ -376,9 +423,17 @@ namespace ByYourSight.InputSystem
 
             // Voice Command Simulation Control Panel (KF01 - KF08) on Left Screen
             GUI.color = Color.white;
-            GUILayout.BeginArea(new Rect(16, 80, 340, 540), "By Your Sight — HoloLens Native (EN)", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(16, 80, 340, 580), "By Your Sight — HoloLens Native (EN)", GUI.skin.window);
 
-            GUILayout.Label("Walk: WASD | Turn Head: Q/E or Right-Click Mouse");
+            string modeLabel = isRealHoloLensRoomMode
+                ? "[R] Mode: REAL HOLOLENS ROOM (Click for Sim)"
+                : "[R] Mode: SIMULATED ROOM (Click for Real Room)";
+            if (GUILayout.Button(modeLabel))
+            {
+                ToggleRealHoloLensRoomMode();
+            }
+
+            GUILayout.Label("Walk: WASD | Turn Head: HoloLens or Q/E/Right-Click");
             GUILayout.Space(6);
 
             if (GUILayout.Button("[1] KF01: \"What is this?\" (Gaze Detect)"))

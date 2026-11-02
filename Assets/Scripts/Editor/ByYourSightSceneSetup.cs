@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.XR.ARFoundation;
 using ByYourSight.Audio;
 using ByYourSight.Perception;
 using ByYourSight.Safety;
@@ -197,13 +198,33 @@ namespace ByYourSight.EditorTools
             Transform wpDesk1 = CreateWaypointNode("WP_Desk_1", envRoot.transform, new Vector3(0.6f, 1.2f, -0.5f));
             Transform wpDesk2 = CreateWaypointNode("WP_Desk_2", envRoot.transform, new Vector3(2.4f, 1.2f, 1.8f));
 
-            // 7. Create Core System GameObject & Attach All By Your Sight Components
+            // 7. Create Core System GameObject & Attach All By Your Sight Components + Real HoloLens Spatial Mesh Scanner
             GameObject coreSys = new GameObject("ByYourSight_CoreSystem");
             coreSys.AddComponent<PriorityAudioManager>();
             ObjectRecognizer recognizer = coreSys.AddComponent<ObjectRecognizer>();
             ObstacleDetector obstacleDetector = coreSys.AddComponent<ObstacleDetector>();
             SpatialBeaconAndNavigator navigator = coreSys.AddComponent<SpatialBeaconAndNavigator>();
             VoiceAndGestureController controller = coreSys.AddComponent<VoiceAndGestureController>();
+
+            // Attach ARSession & ARMeshManager so HoloLens 2 scans real physical walls/obstacles in the room
+            if (Object.FindObjectOfType<ARSession>() == null)
+            {
+                GameObject arSessionObj = new GameObject("HoloLens_ARSession");
+                arSessionObj.transform.SetParent(coreSys.transform);
+                arSessionObj.AddComponent<ARSession>();
+                arSessionObj.AddComponent<ARInputManager>();
+            }
+
+            GameObject meshManagerObj = new GameObject("HoloLens_RealWorldSpatialMesh");
+            meshManagerObj.transform.SetParent(coreSys.transform);
+            ARMeshManager meshManager = meshManagerObj.AddComponent<ARMeshManager>();
+
+            // Create a runtime Spatial Mesh template with MeshFilter + MeshCollider for real-world obstacle raycasting
+            GameObject meshTemplate = new GameObject("SpatialMeshChunkPrefab");
+            meshTemplate.transform.SetParent(coreSys.transform);
+            MeshFilter mf = meshTemplate.AddComponent<MeshFilter>();
+            meshTemplate.AddComponent<MeshCollider>();
+            meshManager.meshPrefab = mf;
 
             navigator.destinations = new List<NavigationDestination>
             {

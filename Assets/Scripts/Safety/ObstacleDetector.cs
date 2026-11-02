@@ -65,7 +65,7 @@ namespace ByYourSight.Safety
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
 
-                // Only treat as hazard if marked HazardObstacle or an untagged structural collider (wall/pillar)
+                // Treat as hazard if marked HazardObstacle OR an untagged real-world Spatial Mesh collider from HoloLens 2
                 bool isHazard = trackable == null || trackable.category == SemanticObjectCategory.HazardObstacle;
                 if (!isHazard)
                 {
@@ -74,7 +74,9 @@ namespace ByYourSight.Safety
                 }
 
                 isHazardDetected = true;
-                currentHazardName = trackable != null ? trackable.labelName : hit.collider.gameObject.name;
+                currentHazardName = trackable != null
+                    ? trackable.labelName
+                    : "Obstacle";
                 currentHazardDistance = hit.distance;
 
                 if (trackable != null)
