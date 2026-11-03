@@ -283,7 +283,7 @@ namespace ByYourSight.InputSystem
             if (cmd == "help")
             {
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Look at a place and say Save door. Then say Find door, or Navigate to door",
+                    "Say: What is this, Find item, Navigate to door, or Mute",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;
