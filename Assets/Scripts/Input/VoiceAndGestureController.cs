@@ -40,7 +40,6 @@ namespace ByYourSight.InputSystem
 
         private float _yaw = 0f;
         private float _pitch = 0f;
-        private bool _hasCalibratedToHoloLensHead = false;
         private string _customCommandInput = "Find Water bottle";
         private string _customSaveLabel = "House Keys";
 
@@ -52,19 +51,7 @@ namespace ByYourSight.InputSystem
             "Identify",
             "Save object",
             "Save item",
-            "Save water bottle",
-            "Save coffee mug",
-            "Save house keys",
-            "Find water bottle",
-            "Find coffee mug",
-            "Find small box",
-            "Find house keys",
-            "Navigate to door",
-            "Take me to the door",
-            "Navigate to desk",
-            "Take me to the desk",
-            "Calibrate",
-            "Reset view",
+            "List saved",
             "Repeat",
             "Details",
             "Mute",
@@ -76,6 +63,48 @@ namespace ByYourSight.InputSystem
             "Help"
         };
 #endif
+
+        [Header("Real-Room Tagging (Save -> Find / Navigate)")]
+        [Tooltip("Labels the user can tag in the real room. Each label generates the voice phrases " +
+                 "\"Save X\", \"Find X\", \"Navigate to X\" and \"Take me to the X\" (KeywordRecognizer needs fixed phrases).")]
+        public List<string> realWorldTagLabels = new List<string>
+        {
+            "door", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
+            "sink", "stairs", "exit", "bag", "phone", "cell phone", "water bottle",
+            "bottle", "coffee mug", "cup", "laptop", "monitor", "book", "pillar",
+            "house keys", "small box"
+        };
+
+        private static readonly string[] _defaultCvLabels = new string[]
+        {
+            "door", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
+            "sink", "stairs", "exit", "bag", "phone", "cell phone", "water bottle",
+            "bottle", "coffee mug", "cup", "laptop", "monitor", "book", "pillar",
+            "house keys", "small box"
+        };
+
+        private string[] BuildVoiceVocabulary()
+        {
+            HashSet<string> phrases = new HashSet<string>();
+#if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
+            foreach (string p in _nativeHoloLensKeywords) phrases.Add(p);
+#endif
+            foreach (string defLabel in _defaultCvLabels)
+            {
+                if (!realWorldTagLabels.Contains(defLabel))
+                    realWorldTagLabels.Add(defLabel);
+            }
+            foreach (string raw in realWorldTagLabels)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                string label = raw.Trim().ToLowerInvariant();
+                phrases.Add($"Save {label}");
+                phrases.Add($"Find {label}");
+                phrases.Add($"Navigate to {label}");
+                phrases.Add($"Take me to the {label}");
+            }
+            return new List<string>(phrases).ToArray();
+        }
 
         private void Start()
         {
@@ -94,7 +123,11 @@ namespace ByYourSight.InputSystem
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || WINDOWS_UWP
             isRealHoloLensRoomMode = true;
 #endif
-            ApplyHoloLensVisualMode();
+            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
+            if (simEnv != null && isRealHoloLensRoomMode)
+            {
+                simEnv.SetActive(false);
+            }
 
             InitializeNativeHoloLensSpeech();
 
@@ -114,7 +147,7 @@ namespace ByYourSight.InputSystem
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
             try
             {
-                _keywordRecognizer = new KeywordRecognizer(_nativeHoloLensKeywords, ConfidenceLevel.Medium);
+                _keywordRecognizer = new KeywordRecognizer(BuildVoiceVocabulary(), ConfidenceLevel.Medium);
                 _keywordRecognizer.OnPhraseRecognized += args =>
                 {
                     ProcessVoiceCommand(args.text);
@@ -188,16 +221,26 @@ namespace ByYourSight.InputSystem
             }
 
             // 4. "Save object [label]" (KF02)
-            if (cmd.StartsWith("save object") || cmd.StartsWith("save item") || cmd.StartsWith("save"))
+            if (cmd.StartsWith("save"))
             {
-                string label = rawCommand.Length > 11
-                    ? rawCommand.Substring(rawCommand.ToLowerInvariant().IndexOf("save") + 4)
-                        .Replace("object", "")
-                        .Replace("item", "")
-                        .Trim()
-                    : _customSaveLabel;
+                // "Save door" -> "door", "Save object House Keys" -> "House Keys", "Save object" -> HUD label
+                string label = rawCommand.Trim().Substring(4).Trim();
+                string lowerLabel = label.ToLowerInvariant();
+                if (lowerLabel.StartsWith("object")) label = label.Substring(6).Trim();
+                else if (lowerLabel.StartsWith("item")) label = label.Substring(4).Trim();
                 if (string.IsNullOrEmpty(label)) label = _customSaveLabel;
                 objectRecognizer?.SaveCustomObjectInGaze(label);
+                return;
+            }
+
+            // "List saved": reads back every label the user has tagged in the real room
+            if (cmd == "list saved")
+            {
+                List<string> saved = objectRecognizer != null ? objectRecognizer.GetSavedLabels() : new List<string>();
+                PriorityAudioManager.Instance.EnqueueSpeech(
+                    saved.Count == 0 ? "Nothing saved yet" : "Saved: " + string.Join(", ", saved),
+                    AudioPriority.P3_ObjectIdentity
+                );
                 return;
             }
 
@@ -214,7 +257,7 @@ namespace ByYourSight.InputSystem
                 {
                     PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                     PriorityAudioManager.Instance.EnqueueSpeech(
-                        $"{targetName} not found nearby",
+                        $"{targetName} not saved yet. Look at it and say Save {targetName}",
                         AudioPriority.P3_ObjectIdentity
                     );
                 }
@@ -243,14 +286,7 @@ namespace ByYourSight.InputSystem
                 return;
             }
 
-            // 8. "Calibrate" / "Reset view"
-            if (cmd == "calibrate" || cmd == "reset view")
-            {
-                CalibrateEnvironmentToUserHead(announce: true);
-                return;
-            }
-
-            // 9. "Cancel" / "Stop"
+            // 8. "Cancel" / "Stop"
             if (cmd == "cancel" || cmd == "stop")
             {
                 navigator?.StopAllGuidance(announce: true);
@@ -299,20 +335,13 @@ namespace ByYourSight.InputSystem
                 InputDevice headDevice = InputDevices.GetDeviceAtXRNode(XRNode.CenterEye);
                 if (headDevice.isValid)
                 {
-                    bool gotPos = headDevice.TryGetFeatureValue(CommonUsages.centerEyePosition, out Vector3 headPos);
-                    bool gotRot = headDevice.TryGetFeatureValue(CommonUsages.centerEyeRotation, out Quaternion headRot);
-                    if (gotPos)
+                    if (headDevice.TryGetFeatureValue(CommonUsages.centerEyePosition, out Vector3 headPos))
                     {
                         cam.localPosition = headPos;
                     }
-                    if (gotRot)
+                    if (headDevice.TryGetFeatureValue(CommonUsages.centerEyeRotation, out Quaternion headRot))
                     {
                         cam.localRotation = headRot;
-                    }
-                    if (!_hasCalibratedToHoloLensHead && (gotPos || gotRot) && Time.timeSinceLevelLoad > 0.5f)
-                    {
-                        _hasCalibratedToHoloLensHead = true;
-                        CalibrateEnvironmentToUserHead(announce: false);
                     }
                 }
             }
@@ -357,71 +386,18 @@ namespace ByYourSight.InputSystem
         public void ToggleRealHoloLensRoomMode()
         {
             isRealHoloLensRoomMode = !isRealHoloLensRoomMode;
-            ApplyHoloLensVisualMode();
+            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
+            if (simEnv != null)
+            {
+                simEnv.SetActive(!isRealHoloLensRoomMode);
+            }
 
             if (PriorityAudioManager.Instance != null)
             {
                 string modeMsg = isRealHoloLensRoomMode
-                    ? "Real room AR mode active"
-                    : "Simulation solid meshes active";
+                    ? "Real room spatial scan active"
+                    : "Simulation room active";
                 PriorityAudioManager.Instance.EnqueueSpeech(modeMsg, AudioPriority.P3_ObjectIdentity);
-            }
-        }
-
-        private void ApplyHoloLensVisualMode()
-        {
-            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
-            if (simEnv == null)
-                return;
-
-            // Keep simEnv active so all TrackableObject colliders work in the real room!
-            simEnv.SetActive(true);
-
-            // Hide the fake grey floor in Real HoloLens Room mode
-            Transform floor = simEnv.transform.Find("Indoor_Floor");
-            if (floor != null)
-            {
-                floor.gameObject.SetActive(!isRealHoloLensRoomMode);
-            }
-
-            // In Real HoloLens Room mode, hide solid primitive MeshRenderers so only 3D AR Wireframe Bounding Boxes appear over the real lab!
-            TrackableObject[] trackables = simEnv.GetComponentsInChildren<TrackableObject>(true);
-            foreach (var t in trackables)
-            {
-                MeshRenderer mr = t.GetComponent<MeshRenderer>();
-                if (mr != null)
-                {
-                    mr.enabled = !isRealHoloLensRoomMode;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Aligns the spatial object anchors around the user's current real-world HoloLens head position and facing direction.
-        /// Originally designed for a user at (0, 1.6, -3.5) facing +Z.
-        /// </summary>
-        public void CalibrateEnvironmentToUserHead(bool announce = true)
-        {
-            GameObject simEnv = GameObject.Find("ByYourSight_PrototypeEnvironment");
-            if (simEnv == null || Camera.main == null)
-                return;
-
-            Transform head = Camera.main.transform;
-            Vector3 flatForward = new Vector3(head.forward.x, 0f, head.forward.z);
-            if (flatForward.sqrMagnitude < 0.001f)
-                flatForward = Vector3.forward;
-            flatForward.Normalize();
-
-            Quaternion targetRot = Quaternion.LookRotation(flatForward, Vector3.up);
-            Vector3 defaultCamLocal = new Vector3(0f, 1.6f, -3.5f);
-
-            simEnv.transform.rotation = targetRot;
-            simEnv.transform.position = head.position - (targetRot * defaultCamLocal);
-
-            if (announce && PriorityAudioManager.Instance != null)
-            {
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success);
-                PriorityAudioManager.Instance.EnqueueSpeech("Calibrated to your view", AudioPriority.P3_ObjectIdentity);
             }
         }
 
@@ -445,16 +421,10 @@ namespace ByYourSight.InputSystem
                 ProcessVoiceCommand(nextMute ? "Mute" : "Resume");
             }
 
-            // 'R' key toggles between Real HoloLens Room (AR Wireframe Only) vs Simulated Solid Room
+            // 'R' key toggles between Real HoloLens Room (Spatial Mesh) vs Simulated Room
             if (Input.GetKeyDown(KeyCode.R))
             {
                 ToggleRealHoloLensRoomMode();
-            }
-
-            // 'C' key calibrates/recenters object anchors in front of current HoloLens head position
-            if (Input.GetKeyDown(KeyCode.C))
-            {
-                CalibrateEnvironmentToUserHead(announce: true);
             }
         }
 
@@ -511,16 +481,11 @@ namespace ByYourSight.InputSystem
             GUILayout.BeginArea(new Rect(16, 80, 340, 580), "By Your Sight — HoloLens Native (EN)", GUI.skin.window);
 
             string modeLabel = isRealHoloLensRoomMode
-                ? "[R] Mode: REAL HOLOLENS AR (Wireframe Only)"
-                : "[R] Mode: SIMULATED ROOM (Solid Shapes)";
+                ? "[R] Mode: REAL HOLOLENS ROOM (Click for Sim)"
+                : "[R] Mode: SIMULATED ROOM (Click for Real Room)";
             if (GUILayout.Button(modeLabel))
             {
                 ToggleRealHoloLensRoomMode();
-            }
-
-            if (GUILayout.Button("[C] Calibrate / Center Objects to HoloLens View"))
-            {
-                CalibrateEnvironmentToUserHead(announce: true);
             }
 
             GUILayout.Label("Walk: WASD | Turn Head: HoloLens or Q/E/Right-Click");

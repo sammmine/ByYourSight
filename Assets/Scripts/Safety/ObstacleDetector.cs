@@ -73,10 +73,23 @@ namespace ByYourSight.Safety
                     return;
                 }
 
+                string classifiedObstacle = "Obstacle";
+                if (trackable != null)
+                {
+                    classifiedObstacle = trackable.labelName;
+                }
+                else if (ComputerVisionDetector.Instance != null)
+                {
+                    classifiedObstacle = ComputerVisionDetector.Instance.ClassifyObstacleSurface(hit, head);
+                    if (string.Equals(classifiedObstacle, "Floor", System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        isHazardDetected = false;
+                        return;
+                    }
+                }
+
                 isHazardDetected = true;
-                currentHazardName = trackable != null
-                    ? trackable.labelName
-                    : "Obstacle";
+                currentHazardName = classifiedObstacle;
                 currentHazardDistance = hit.distance;
 
                 if (trackable != null)
