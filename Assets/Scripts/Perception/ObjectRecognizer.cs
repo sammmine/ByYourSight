@@ -27,6 +27,14 @@ namespace ByYourSight.Perception
         private readonly Dictionary<TrackableObject, float> _lastPersonAlertTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
 
+        private void Awake()
+        {
+            if (GetComponent<ComputerVisionDetector>() == null)
+            {
+                gameObject.AddComponent<ComputerVisionDetector>();
+            }
+        }
+
         private void Update()
         {
             MonitorApproachingPeople();
@@ -41,7 +49,15 @@ namespace ByYourSight.Perception
             if (Camera.main == null || PriorityAudioManager.Instance == null)
                 return;
 
-            if (simulateLowLightWarning)
+            ComputerVisionDetector cv = ComputerVisionDetector.Instance;
+            if (cv == null)
+            {
+                cv = GetComponent<ComputerVisionDetector>();
+                if (cv == null)
+                    cv = gameObject.AddComponent<ComputerVisionDetector>();
+            }
+
+            if (simulateLowLightWarning || (cv != null && cv.isLowLightDetected))
             {
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                 PriorityAudioManager.Instance.EnqueueSpeech(
@@ -52,31 +68,47 @@ namespace ByYourSight.Perception
             }
 
             Transform head = Camera.main.transform;
-            Ray gazeRay = new Ray(head.position, head.forward);
 
-            if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
+            // 1. Check if the user is looking near an already-saved custom real-world anchor (within 24° gaze cone)
+            TrackableObject savedInCone = FindSavedAnchorInGazeCone(head, 24f, maxGazeDistance);
+            if (savedInCone != null)
+            {
+                AnnounceTrackableObject(head, savedInCone, savedInCone.transform.position, Vector3.Distance(head.position, savedInCone.transform.position));
+                return;
+            }
+
+            // 2. Raycast / Multi-Ray Gaze Cone against Scene & HoloLens Spatial Mesh
+            bool has3DHit = cv != null
+                ? cv.TryFindBestGazeHit(head, gazeSphereRadius, maxGazeDistance, out RaycastHit hit)
+                : Physics.SphereCast(new Ray(head.position, head.forward), gazeSphereRadius, out hit, maxGazeDistance);
+
+            if (has3DHit)
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                string objName = trackable != null ? trackable.labelName : "Object surface";
+                if (trackable != null)
+                {
+                    AnnounceTrackableObject(head, trackable, hit.point, hit.distance);
+                    return;
+                }
+
+                // 3. Unrecognized real-world object on Spatial Mesh -> Run Computer Vision & 3D Point-Cloud Classifier
+                CVDetectionResult cvResult = cv.IdentifyUnrecognizedObjectAtGaze(head, true, hit, maxGazeDistance);
+                string objName = cvResult.isDetected && !string.IsNullOrEmpty(cvResult.label)
+                    ? cvResult.label
+                    : "Object";
+
                 float dist = Mathf.Max(0.5f, Mathf.Round(hit.distance * 2f) / 2f); // Round to nearest 0.5m
-                string distText = Mathf.Approximately(dist, 1f)
-                    ? "1 meter"
-                    : (dist % 1f == 0f ? $"{(int)dist} meters" : $"{dist:0.0} meters");
+                string distText = FormatDistanceMeters(dist);
                 string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, hit.point);
 
                 string shortMsg = $"{objName}, {distText}, {dirText}";
-                string detailMsg = trackable != null && !string.IsNullOrEmpty(trackable.detailedDescription)
-                    ? $"{objName}, {distText} {dirText}. {trackable.detailedDescription}"
+                string detailMsg = cvResult.isDetected && !string.IsNullOrEmpty(cvResult.detailedDescription)
+                    ? $"{objName}, {distText} {dirText}. {cvResult.detailedDescription}"
                     : $"{objName} detected at {distText} {dirText}";
 
-                if (trackable != null)
-                {
-                    trackable.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.0f);
-                }
-                else
-                {
-                    SpawnTemporaryRealWorldHighlightBox(hit.point, TrackableObject.HighContrastYellow, 3.0f);
-                }
+                Vector3 highlightScale = cvResult.isDetected ? cvResult.estimatedBounds : new Vector3(0.25f, 0.25f, 0.25f);
+                SpawnTemporaryRealWorldHighlightBox(hit.point, TrackableObject.HighContrastYellow, 3.0f, highlightScale);
+                CacheAutoDetectedRealWorldObject(hit.point, objName, detailMsg, cvResult.category, highlightScale);
 
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
                 PriorityAudioManager.Instance.EnqueueSpeech(
@@ -85,15 +117,98 @@ namespace ByYourSight.Perception
                     hit.point,
                     detailMsg
                 );
+                return;
             }
-            else
+
+            // 4. Fallback: No 3D Spatial Mesh collider hit (e.g., small handheld item within 0.4m-1.2m camera view)
+            if (cv != null)
             {
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    "No object detected ahead",
-                    AudioPriority.P3_ObjectIdentity
-                );
+                CVDetectionResult camOnly = cv.IdentifyUnrecognizedObjectAtGaze(head, false, default, maxGazeDistance);
+                if (camOnly.isDetected && !string.IsNullOrEmpty(camOnly.label))
+                {
+                    float rawDist = Vector3.Distance(head.position, camOnly.worldPosition);
+                    float dist = Mathf.Max(0.5f, Mathf.Round(rawDist * 2f) / 2f);
+                    string distText = FormatDistanceMeters(dist);
+                    string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, camOnly.worldPosition);
+
+                    string shortMsg = $"{camOnly.label}, {distText}, {dirText}";
+                    string detailMsg = $"{camOnly.label}, {distText} {dirText}. {camOnly.detailedDescription}";
+
+                    SpawnTemporaryRealWorldHighlightBox(camOnly.worldPosition, TrackableObject.HighContrastYellow, 3.0f, camOnly.estimatedBounds);
+                    CacheAutoDetectedRealWorldObject(camOnly.worldPosition, camOnly.label, detailMsg, camOnly.category, camOnly.estimatedBounds);
+
+                    PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, camOnly.worldPosition);
+                    PriorityAudioManager.Instance.EnqueueSpeech(
+                        shortMsg,
+                        AudioPriority.P3_ObjectIdentity,
+                        camOnly.worldPosition,
+                        detailMsg
+                    );
+                    return;
+                }
             }
+
+            PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
+            PriorityAudioManager.Instance.EnqueueSpeech(
+                "No object detected ahead",
+                AudioPriority.P3_ObjectIdentity
+            );
+        }
+
+        private void AnnounceTrackableObject(Transform head, TrackableObject trackable, Vector3 hitPoint, float rawDistance)
+        {
+            string objName = trackable.labelName;
+            float dist = Mathf.Max(0.5f, Mathf.Round(rawDistance * 2f) / 2f);
+            string distText = FormatDistanceMeters(dist);
+            string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, hitPoint);
+
+            string shortMsg = $"{objName}, {distText}, {dirText}";
+            string detailMsg = !string.IsNullOrEmpty(trackable.detailedDescription)
+                ? $"{objName}, {distText} {dirText}. {trackable.detailedDescription}"
+                : $"{objName} detected at {distText} {dirText}";
+
+            trackable.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.0f);
+
+            PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hitPoint);
+            PriorityAudioManager.Instance.EnqueueSpeech(
+                shortMsg,
+                AudioPriority.P3_ObjectIdentity,
+                hitPoint,
+                detailMsg
+            );
+        }
+
+        private static string FormatDistanceMeters(float dist)
+        {
+            return Mathf.Approximately(dist, 1f)
+                ? "1 meter"
+                : (dist % 1f == 0f ? $"{(int)dist} meters" : $"{dist:0.0} meters");
+        }
+
+        private TrackableObject FindSavedAnchorInGazeCone(Transform head, float maxAngleDeg, float maxDist)
+        {
+            TrackableObject best = null;
+            float bestAngle = maxAngleDeg;
+
+            foreach (TrackableObject t in FindObjectsOfType<TrackableObject>())
+            {
+                if (!IsRealWorldAnchor(t))
+                    continue;
+
+                Vector3 toObj = t.transform.position - head.position;
+                float d = toObj.magnitude;
+                if (d > maxDist || d < 0.1f)
+                    continue;
+
+                float angle = Vector3.Angle(head.forward, toObj);
+                if (angle < bestAngle)
+                {
+                    bestAngle = angle;
+                    best = t;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>
@@ -107,10 +222,24 @@ namespace ByYourSight.Perception
                 return;
 
             Transform head = Camera.main.transform;
-            Ray gazeRay = new Ray(head.position, head.forward);
+            ComputerVisionDetector cv = ComputerVisionDetector.Instance;
+            bool hasHit = cv != null
+                ? cv.TryFindBestGazeHit(head, gazeSphereRadius, maxGazeDistance, out RaycastHit hit)
+                : Physics.SphereCast(new Ray(head.position, head.forward), gazeSphereRadius, out hit, maxGazeDistance);
+
             string finalLabel = string.IsNullOrWhiteSpace(customLabel) ? "Saved Item" : customLabel.Trim();
 
-            if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
+            // If user said generic "Save object", infer the label via Computer Vision when possible
+            if (string.Equals(finalLabel, "Saved Item", System.StringComparison.OrdinalIgnoreCase) && cv != null)
+            {
+                CVDetectionResult cvGuess = cv.IdentifyUnrecognizedObjectAtGaze(head, hasHit, hit, maxGazeDistance);
+                if (cvGuess.isDetected && !string.IsNullOrEmpty(cvGuess.label))
+                {
+                    finalLabel = cvGuess.label;
+                }
+            }
+
+            if (hasHit)
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
                 // Relabel simulated objects, but never overwrite another real-room tag the user is looking at
@@ -158,10 +287,57 @@ namespace ByYourSight.Perception
         }
 
         private const string RealWorldAnchorPrefix = "RealWorldAnchor_";
+        private const string AutoDetectedAnchorPrefix = "RealWorldAutoCV_";
 
         private static bool IsRealWorldAnchor(TrackableObject t)
         {
             return t != null && t.gameObject.name.StartsWith(RealWorldAnchorPrefix);
+        }
+
+        /// <summary>
+        /// Caches an object automatically recognized by Computer Vision so the user can immediately
+        /// say "Find [object]" (KF03) or "Navigate to [object]" (KF05) without having to manually save it first.
+        /// </summary>
+        private void CacheAutoDetectedRealWorldObject(
+            Vector3 worldPos,
+            string label,
+            string detail,
+            SemanticObjectCategory category,
+            Vector3 bounds)
+        {
+            if (string.IsNullOrWhiteSpace(label) || string.Equals(label, "Wall", System.StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(label, "Floor", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            // Do not overwrite user-saved custom anchors with the same name
+            foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
+            {
+                if (IsRealWorldAnchor(existing) &&
+                    string.Equals(existing.labelName, label, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (existing.gameObject.name.StartsWith(AutoDetectedAnchorPrefix) &&
+                    string.Equals(existing.labelName, label, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    existing.transform.position = worldPos;
+                    existing.detailedDescription = detail;
+                    return;
+                }
+            }
+
+            GameObject autoObj = new GameObject(AutoDetectedAnchorPrefix + label);
+            autoObj.transform.position = worldPos;
+            autoObj.transform.localScale = bounds;
+
+            TrackableObject t = autoObj.AddComponent<TrackableObject>();
+            t.labelName = label;
+            t.detailedDescription = detail;
+            t.category = category;
+            t.isCustomUserSaved = false;
         }
 
         /// <summary>
@@ -172,8 +348,11 @@ namespace ByYourSight.Perception
             List<string> labels = new List<string>();
             foreach (TrackableObject t in FindObjectsOfType<TrackableObject>())
             {
-                if (IsRealWorldAnchor(t) && !labels.Contains(t.labelName))
+                if ((IsRealWorldAnchor(t) || t.gameObject.name.StartsWith(AutoDetectedAnchorPrefix)) &&
+                    !labels.Contains(t.labelName))
+                {
                     labels.Add(t.labelName);
+                }
             }
             return labels;
         }
@@ -183,7 +362,7 @@ namespace ByYourSight.Perception
             // Saving the same label again moves the tag instead of creating a duplicate
             foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
             {
-                if (IsRealWorldAnchor(existing) &&
+                if ((IsRealWorldAnchor(existing) || existing.gameObject.name.StartsWith(AutoDetectedAnchorPrefix)) &&
                     string.Equals(existing.labelName, label, System.StringComparison.OrdinalIgnoreCase))
                 {
                     Destroy(existing.gameObject);
@@ -218,11 +397,16 @@ namespace ByYourSight.Perception
 
         public static void SpawnTemporaryRealWorldHighlightBox(Vector3 worldPos, Color color, float duration)
         {
+            SpawnTemporaryRealWorldHighlightBox(worldPos, color, duration, new Vector3(0.25f, 0.25f, 0.25f));
+        }
+
+        public static void SpawnTemporaryRealWorldHighlightBox(Vector3 worldPos, Color color, float duration, Vector3 scale)
+        {
             GameObject boxObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
             boxObj.name = "RealWorldHighlightMarker";
             Destroy(boxObj.GetComponent<Collider>());
             boxObj.transform.position = worldPos;
-            boxObj.transform.localScale = new Vector3(0.25f, 0.25f, 0.25f);
+            boxObj.transform.localScale = scale;
 
             Renderer r = boxObj.GetComponent<Renderer>();
             if (r != null)
@@ -293,7 +477,7 @@ namespace ByYourSight.Perception
                 if (_previousPersonDistance.TryGetValue(obj, out float prevDist))
                 {
                     bool isGettingCloser = (prevDist - currentDist) > 0.015f;
-                    if (currentDist <= personDetectionRadius && isGettingCloser)
+                    if (currentDist >= minPersonDetectionDistance && currentDist <= personDetectionRadius && isGettingCloser)
                     {
                         float lastAlert = _lastPersonAlertTime.TryGetValue(obj, out float t) ? t : -999f;
                         if (Time.time - lastAlert >= personAlertCooldown)

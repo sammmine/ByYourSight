@@ -37,10 +37,15 @@ namespace ByYourSight.EditorTools
             if (EditorApplication.isPlayingOrWillChangePlaymode)
                 return;
 
-            // Automatically populate the prototype scene if it hasn't been set up yet
-            if (GameObject.Find("ByYourSight_CoreSystem") == null && GameObject.Find("ByYourSight_PrototypeEnvironment") == null)
+            GameObject existingCore = GameObject.Find("ByYourSight_CoreSystem");
+            if (existingCore == null && GameObject.Find("ByYourSight_PrototypeEnvironment") == null)
             {
                 BuildPrototypeScene();
+            }
+            else if (existingCore != null && existingCore.GetComponent<ComputerVisionDetector>() == null)
+            {
+                existingCore.AddComponent<ComputerVisionDetector>();
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
             }
         }
 
@@ -208,6 +213,7 @@ namespace ByYourSight.EditorTools
             // 7. Create Core System GameObject & Attach All By Your Sight Components + Real HoloLens Spatial Mesh Scanner
             GameObject coreSys = new GameObject("ByYourSight_CoreSystem");
             coreSys.AddComponent<PriorityAudioManager>();
+            coreSys.AddComponent<ComputerVisionDetector>();
             ObjectRecognizer recognizer = coreSys.AddComponent<ObjectRecognizer>();
             ObstacleDetector obstacleDetector = coreSys.AddComponent<ObstacleDetector>();
             SpatialBeaconAndNavigator navigator = coreSys.AddComponent<SpatialBeaconAndNavigator>();

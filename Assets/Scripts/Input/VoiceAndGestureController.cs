@@ -70,7 +70,16 @@ namespace ByYourSight.InputSystem
         public List<string> realWorldTagLabels = new List<string>
         {
             "door", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
-            "sink", "stairs", "exit", "bag", "phone", "water bottle", "coffee mug",
+            "sink", "stairs", "exit", "bag", "phone", "cell phone", "water bottle",
+            "bottle", "coffee mug", "cup", "laptop", "monitor", "book", "pillar",
+            "house keys", "small box"
+        };
+
+        private static readonly string[] _defaultCvLabels = new string[]
+        {
+            "door", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
+            "sink", "stairs", "exit", "bag", "phone", "cell phone", "water bottle",
+            "bottle", "coffee mug", "cup", "laptop", "monitor", "book", "pillar",
             "house keys", "small box"
         };
 
@@ -80,6 +89,11 @@ namespace ByYourSight.InputSystem
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
             foreach (string p in _nativeHoloLensKeywords) phrases.Add(p);
 #endif
+            foreach (string defLabel in _defaultCvLabels)
+            {
+                if (!realWorldTagLabels.Contains(defLabel))
+                    realWorldTagLabels.Add(defLabel);
+            }
             foreach (string raw in realWorldTagLabels)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
