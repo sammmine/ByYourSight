@@ -42,6 +42,7 @@ namespace ByYourSight.InputSystem
         private float _pitch = 0f;
         private string _customCommandInput = "Find Water bottle";
         private string _customSaveLabel = "House Keys";
+        private RealWorldObjectDetector _objectDetector;
 
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
         private KeywordRecognizer _keywordRecognizer;
@@ -74,13 +75,23 @@ namespace ByYourSight.InputSystem
             "house keys", "small box"
         };
 
+        // Labels the camera detection server (Opsi 2) can produce. Always in the vocabulary, even when the
+        // scene has an older saved copy of realWorldTagLabels.
+        private static readonly string[] CameraDetectableLabels =
+        {
+            "person", "chair", "table", "sofa", "bed", "toilet", "laptop", "book", "television", "plant",
+            "bag", "phone", "water bottle", "coffee mug", "trash bin", "door", "stairs"
+        };
+
         private string[] BuildVoiceVocabulary()
         {
             HashSet<string> phrases = new HashSet<string>();
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
             foreach (string p in _nativeHoloLensKeywords) phrases.Add(p);
 #endif
-            foreach (string raw in realWorldTagLabels)
+            List<string> allLabels = new List<string>(realWorldTagLabels);
+            allLabels.AddRange(CameraDetectableLabels);
+            foreach (string raw in allLabels)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
                 string label = raw.Trim().ToLowerInvariant();
@@ -97,6 +108,7 @@ namespace ByYourSight.InputSystem
             if (objectRecognizer == null) objectRecognizer = FindObjectOfType<ObjectRecognizer>();
             if (navigator == null) navigator = FindObjectOfType<SpatialBeaconAndNavigator>();
             if (obstacleDetector == null) obstacleDetector = FindObjectOfType<ObstacleDetector>();
+            if (FindObjectOfType<RealWorldObjectDetector>() == null) gameObject.AddComponent<RealWorldObjectDetector>();
 
             if (Camera.main != null)
             {
@@ -475,6 +487,15 @@ namespace ByYourSight.InputSystem
             }
 
             GUILayout.Label("Walk: WASD | Turn Head: HoloLens or Q/E/Right-Click");
+
+            if (_objectDetector == null) _objectDetector = FindObjectOfType<RealWorldObjectDetector>();
+            if (_objectDetector != null && _objectDetector.enableDetection)
+            {
+                string camStatus = _objectDetector.isServerConnected
+                    ? $"Camera AI: ON | {_objectDetector.trackedObjectCount} objects | sees: {(_objectDetector.lastDetectedLabels == "" ? "-" : _objectDetector.lastDetectedLabels)}"
+                    : "Camera AI: OFF (start detection_server.py)";
+                GUILayout.Label(camStatus);
+            }
             GUILayout.Space(6);
 
             if (GUILayout.Button("[1] KF01: \"What is this?\" (Gaze Detect)"))

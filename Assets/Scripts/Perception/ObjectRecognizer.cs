@@ -26,6 +26,7 @@ namespace ByYourSight.Perception
 
         private readonly Dictionary<TrackableObject, float> _lastPersonAlertTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
+        private readonly Dictionary<TrackableObject, float> _lastPersonSampleTime = new Dictionary<TrackableObject, float>();
 
         private void Update()
         {
@@ -57,7 +58,7 @@ namespace ByYourSight.Perception
             if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                string objName = trackable != null ? trackable.labelName : "Object surface";
+                string objName = trackable != null ? trackable.labelName : SurfaceClassifier.Describe(hit, head);
                 float dist = Mathf.Max(0.5f, Mathf.Round(hit.distance * 2f) / 2f); // Round to nearest 0.5m
                 string distText = Mathf.Approximately(dist, 1f)
                     ? "1 meter"
@@ -113,8 +114,8 @@ namespace ByYourSight.Perception
             if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
             {
                 TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                // Relabel simulated objects, but never overwrite another real-room tag the user is looking at
-                if (trackable != null && !IsRealWorldAnchor(trackable))
+                // Relabel simulated objects, but never overwrite another real-room tag or a camera-detected object
+                if (trackable != null && !IsRealWorldAnchor(trackable) && !RealWorldObjectDetector.IsDetectionMarker(trackable))
                 {
                     trackable.labelName = finalLabel;
                     trackable.detailedDescription = $"Personal item saved by user with label {finalLabel}";
@@ -289,10 +290,16 @@ namespace ByYourSight.Perception
                 if (obj.category != SemanticObjectCategory.Person)
                     continue;
 
+                // Sample every 0.5 s: camera-estimated distances jitter, so require a real approach (~0.4 m/s)
+                float lastSample = _lastPersonSampleTime.TryGetValue(obj, out float ls) ? ls : -999f;
+                if (Time.time - lastSample < 0.5f)
+                    continue;
+                _lastPersonSampleTime[obj] = Time.time;
+
                 float currentDist = Vector3.Distance(head.position, obj.transform.position);
                 if (_previousPersonDistance.TryGetValue(obj, out float prevDist))
                 {
-                    bool isGettingCloser = (prevDist - currentDist) > 0.015f;
+                    bool isGettingCloser = (prevDist - currentDist) > 0.2f;
                     if (currentDist <= personDetectionRadius && isGettingCloser)
                     {
                         float lastAlert = _lastPersonAlertTime.TryGetValue(obj, out float t) ? t : -999f;

@@ -212,6 +212,7 @@ namespace ByYourSight.EditorTools
             ObstacleDetector obstacleDetector = coreSys.AddComponent<ObstacleDetector>();
             SpatialBeaconAndNavigator navigator = coreSys.AddComponent<SpatialBeaconAndNavigator>();
             VoiceAndGestureController controller = coreSys.AddComponent<VoiceAndGestureController>();
+            coreSys.AddComponent<RealWorldObjectDetector>(); // Opsi 2: camera object detection (Tools/ObjectDetectionServer)
 
             // Attach ARSession & ARMeshManager so HoloLens 2 scans real physical walls/obstacles in the room
             if (Object.FindObjectOfType<ARSession>() == null)

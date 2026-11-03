@@ -71,6 +71,7 @@ namespace ByYourSight.Audio
         private AudioSource _spatialVoiceSource;
         private float _speechBusyUntil = 0f;
         private float _lastDangerAlertTime = -10f;
+        private bool _lastDangerHadEarcon = false;
 
 #if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
         private Process _macSayProcess;
@@ -134,21 +135,27 @@ namespace ByYourSight.Audio
         /// Queue or immediately speak text according to P0-P3 priority.
         /// T3 sentence pattern: [What] + [Distance] + [Direction], max 6-8 words.
         /// </summary>
-        public void EnqueueSpeech(string shortText, AudioPriority priority, Vector3? worldPos = null, string detailedText = "")
+        public bool EnqueueSpeech(string shortText, AudioPriority priority, Vector3? worldPos = null, string detailedText = "", bool playAlarmEarcon = true)
         {
             if (string.IsNullOrWhiteSpace(shortText))
-                return;
+                return false;
 
             // P0 (Danger Alarm) interrupts all other audio and plays immediately
             if (priority == AudioPriority.P0_DangerAlarm)
             {
-                // Brief 2.2s cooldown so P0 alarms don't stack every frame
-                if (Time.time - _lastDangerAlertTime < 2.2f)
-                    return;
+                // Brief 2.2s cooldown so P0 alarms don't stack every frame.
+                // A critical alarm (with earcon) may still escalate right after a calm hazard notice.
+                bool escalation = playAlarmEarcon && !_lastDangerHadEarcon;
+                if (Time.time - _lastDangerAlertTime < 2.2f && !escalation)
+                    return false;
 
                 _lastDangerAlertTime = Time.time;
+                _lastDangerHadEarcon = playAlarmEarcon;
                 StopCurrentSpeech();
-                PlayEarcon(EarconType.DangerAlarm);
+                if (playAlarmEarcon)
+                {
+                    PlayEarcon(EarconType.DangerAlarm);
+                }
 
                 // Clear stale P2/P3 messages when a hazard occurs
                 _queue.RemoveAll(q => q.Priority >= AudioPriority.P2_SocialInfo);
@@ -161,11 +168,11 @@ namespace ByYourSight.Audio
                     WorldPosition = worldPos,
                     Timestamp = Time.time
                 });
-                return;
+                return true;
             }
 
             if (isMuted)
-                return;
+                return false;
 
             // P1 (Navigation) replaces any older P1 instruction waiting in the queue
             if (priority == AudioPriority.P1_Navigation)
@@ -175,7 +182,7 @@ namespace ByYourSight.Audio
 
             // Avoid duplicate identical messages in the queue
             if (_queue.Exists(q => q.Text == shortText))
-                return;
+                return false;
 
             _queue.Add(new SpeechRequest
             {
@@ -185,6 +192,7 @@ namespace ByYourSight.Audio
                 WorldPosition = worldPos,
                 Timestamp = Time.time
             });
+            return true;
         }
 
         private void ExecuteSpeech(SpeechRequest req)
