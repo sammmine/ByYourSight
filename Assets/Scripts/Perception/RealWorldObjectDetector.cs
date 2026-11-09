@@ -22,7 +22,7 @@ namespace ByYourSight.Perception
         public bool enableDetection = true;
         public string serverUrl = "http://127.0.0.1:8765/detections";
         public float pollIntervalSeconds = 0.25f;
-        [Range(0f, 1f)] public float minConfidence = 0.45f;
+        [Range(0f, 1f)] public float minConfidence = 0.25f;
 
         [Header("HoloLens 2 PV Camera Projection")]
         [Tooltip("Horizontal field of view of the HoloLens 2 photo/video camera in the live stream")]
@@ -224,6 +224,9 @@ namespace ByYourSight.Perception
 
         private void OnEnable()
         {
+            // Ensure Unity accepts all detections shown on the http://127.0.0.1:8765 preview (server default conf = 0.25)
+            if (minConfidence > 0.25f)
+                minConfidence = 0.25f;
             StartCoroutine(PollLoop());
         }
 
@@ -376,9 +379,18 @@ namespace ByYourSight.Perception
                 }
                 else
                 {
-                    if (!hasSurface)
-                        continue; // area not scanned yet, no reliable 3D position
-                    distance = hit.distance;
+                    // Furniture / hazard object (chair, desk, shelf, door, trash bin, bag, etc.):
+                    // Use Spatial Mesh hit distance when available; otherwise estimate from bounding box height
+                    // so detections visible on http://127.0.0.1:8765 are never discarded when mesh is unscanned.
+                    if (hasSurface)
+                    {
+                        distance = hit.distance;
+                    }
+                    else
+                    {
+                        float furnitureEstimate = 0.85f / Mathf.Max(0.05f, d.h * 2f * tanV);
+                        distance = Mathf.Clamp(furnitureEstimate, 0.7f, maxDetectionDistance);
+                    }
                 }
                 Vector3 point = pose.position + worldDir * distance;
 

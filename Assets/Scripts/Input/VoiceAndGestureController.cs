@@ -47,21 +47,30 @@ namespace ByYourSight.InputSystem
         // Maps phonetic/variant spoken phrases -> canonical Indonesian command
         private readonly Dictionary<string, string> _phoneticCommandAliases = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
         {
-            // KF01: "Ini apa?"
+            // KF01: "Ini apa?" (including acoustic neighbors for Windows en-US recognizer)
             { "ini apa", "ini apa" },
             { "inny apa", "ini apa" },
+            { "innie apa", "ini apa" },
+            { "any apa", "ini apa" },
+            { "in knee apa", "ini apa" },
             { "ee knee ah pah", "ini apa" },
+            { "ini a pa", "ini apa" },
+            { "ini up a", "ini apa" },
             { "apa ini", "ini apa" },
             { "ah pah ee knee", "ini apa" },
+            { "ah pah ini", "ini apa" },
+            { "up a ini", "ini apa" },
+            { "ada apa", "ini apa" },
+            { "benda apa", "ini apa" },
+            { "objek apa", "ini apa" },
+            { "lihat ini", "ini apa" },
             { "lihat depan", "ini apa" },
             { "what is this", "ini apa" },
             { "identify", "ini apa" },
 
             // KF02: "Simpan objek" (uses HUD label if no object specified)
             { "simpan objek", "simpan objek" },
-            { "seem pan objek", "simpan objek" },
             { "simpan benda", "simpan objek" },
-            { "seem pan benda", "simpan objek" },
             { "save object", "simpan objek" },
             { "save item", "simpan objek" },
 
@@ -70,6 +79,7 @@ namespace ByYourSight.InputSystem
             { "lihat simpanan", "daftar simpanan" },
             { "list saved", "daftar simpanan" },
             { "hapus simpanan", "hapus simpanan" },
+            { "hapus semua", "hapus simpanan" },
             { "reset simpanan", "hapus simpanan" },
             { "clear saved", "hapus simpanan" },
             { "delete saved", "hapus simpanan" },
@@ -123,60 +133,9 @@ namespace ByYourSight.InputSystem
         public List<string> realWorldTagLabels = new List<string>
         {
             "pintu", "rak", "tempat sampah", "hidran", "meja", "kursi", "jendela", "sofa", "tempat tidur", "lemari",
-            "wastafel", "tangga", "tas", "handphone", "botol minum", "cangkir", "kunci", "kotak", "buku", "laptop",
+            "wastafel", "tangga", "tas", "handphone", "botol minum", "botol", "cangkir", "gelas", "kunci", "kotak", "buku", "laptop",
             "door", "shelf", "rack", "trash bin", "fire hydrant", "desk", "chair", "table", "window", "bed", "cabinet",
             "sink", "stairs", "exit", "bag", "phone", "water bottle", "coffee mug", "house keys", "small box"
-        };
-
-        // Bilingual + Phonetic object variants for Windows KeywordRecognizer (en-US acoustic engine)
-        private static readonly string[,] ObjectPhoneticVariants = new string[,]
-        {
-            { "pintu", "peen too" },
-            { "pintu", "pin too" },
-            { "pintu", "door" },
-            { "meja", "may jah" },
-            { "meja", "meh ja" },
-            { "meja", "desk" },
-            { "meja", "table" },
-            { "kursi", "koor see" },
-            { "kursi", "chair" },
-            { "rak", "ruck" },
-            { "rak", "shelf" },
-            { "rak", "rack" },
-            { "tempat sampah", "sampah" },
-            { "tempat sampah", "sum pah" },
-            { "tempat sampah", "trash bin" },
-            { "botol minum", "botol" },
-            { "botol minum", "bo tol" },
-            { "botol minum", "water bottle" },
-            { "cangkir", "chung keer" },
-            { "cangkir", "gelas" },
-            { "cangkir", "guh las" },
-            { "cangkir", "coffee mug" },
-            { "kunci", "koon chee" },
-            { "kunci", "house keys" },
-            { "tas", "tuss" },
-            { "tas", "bag" },
-            { "handphone", "hape" },
-            { "handphone", "hah peh" },
-            { "handphone", "ponsel" },
-            { "handphone", "phone" },
-            { "buku", "boo koo" },
-            { "buku", "book" },
-            { "kotak", "ko tak" },
-            { "kotak", "small box" },
-            { "hidran", "hee drun" },
-            { "hidran", "fire hydrant" },
-            { "tangga", "tung gah" },
-            { "tangga", "stairs" },
-            { "lemari", "luh mah ree" },
-            { "lemari", "cabinet" },
-            { "tempat tidur", "kasur" },
-            { "tempat tidur", "kah soor" },
-            { "tempat tidur", "bed" },
-            { "sofa", "sofa" },
-            { "laptop", "laptop" },
-            { "jendela", "window" }
         };
 
         private string[] BuildVoiceVocabulary()
@@ -187,37 +146,28 @@ namespace ByYourSight.InputSystem
                 phrases.Add(key);
             }
 
-            // Collect all object spoken variants (Indonesian, Phonetic, and English)
+            // Collect clean object terms (avoiding 2-syllable phonetic fragments like "hah peh" / "sum pah"
+            // that cause the en-US acoustic model to misrecognize "ini apa" as "cari hape")
             HashSet<string> objectTerms = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
             foreach (string raw in realWorldTagLabels)
             {
                 if (!string.IsNullOrWhiteSpace(raw))
                     objectTerms.Add(raw.Trim().ToLowerInvariant());
             }
-            int variantCount = ObjectPhoneticVariants.GetLength(0);
-            for (int i = 0; i < variantCount; i++)
-            {
-                objectTerms.Add(ObjectPhoneticVariants[i, 0]);
-                objectTerms.Add(ObjectPhoneticVariants[i, 1]);
-            }
 
             foreach (string item in objectTerms)
             {
-                // Indonesian + Phonetic prefixes
+                // Indonesian prefixes
                 phrases.Add($"simpan {item}");
-                phrases.Add($"seem pan {item}");
+                phrases.Add($"simpan objek {item}");
                 phrases.Add($"cari {item}");
-                phrases.Add($"chah ree {item}");
-                phrases.Add($"cha ree {item}");
                 phrases.Add($"antar ke {item}");
-                phrases.Add($"un tar ke {item}");
                 phrases.Add($"navigasi ke {item}");
 
                 // English fallback prefixes
                 phrases.Add($"save {item}");
                 phrases.Add($"find {item}");
                 phrases.Add($"navigate to {item}");
-                phrases.Add($"take me to the {item}");
             }
 
             return new List<string>(phrases).ToArray();
@@ -316,6 +266,7 @@ namespace ByYourSight.InputSystem
                 cmd = canonical;
             }
 
+            Debug.Log($"[Voice] Recognized: \"{rawCommand}\" -> \"{cmd}\"");
             PriorityAudioManager.Instance.PlayEarcon(EarconType.ListeningStart);
 
             // 1. "Diam" / "Mute" (KF06)

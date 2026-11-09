@@ -183,8 +183,8 @@ namespace ByYourSight.Perception
             if (foundObject)
                 return true;
 
-            // Fallback: check if any non-Person TrackableObject is within a 20-degree cone of head gaze
-            // (handles slight PV camera pitch offset on HoloLens 2 when holding small objects in front of the visor)
+            // Fallback: check if any non-Person TrackableObject is within the camera field of view (42-degree cone)
+            // (handles PV camera pitch offset on HoloLens 2 & webcam framing when holding objects like a phone)
             TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
             float bestAngleScore = float.MaxValue;
             foreach (TrackableObject t in allObjects)
@@ -198,7 +198,7 @@ namespace ByYourSight.Perception
                     continue;
 
                 float angle = Vector3.Angle(head.forward, toObj);
-                if (angle <= 20f)
+                if (angle <= 42f)
                 {
                     int priority = (t.isCustomUserSaved || t.category == SemanticObjectCategory.EverydayObject) ? 0 : 1;
                     float score = priority * 100f + angle;
