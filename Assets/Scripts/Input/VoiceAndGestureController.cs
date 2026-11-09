@@ -47,16 +47,42 @@ namespace ByYourSight.InputSystem
         // Maps phonetic/variant spoken phrases -> canonical Indonesian command
         private readonly Dictionary<string, string> _phoneticCommandAliases = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
         {
-            // KF01: "Ini apa?" (including acoustic neighbors for Windows en-US recognizer)
+            // KF01: "Ini apa?" (including real English dictionary words that match /ɪni ɑpɑ/ on Windows en-US recognizer)
             { "ini apa", "ini apa" },
             { "inny apa", "ini apa" },
             { "innie apa", "ini apa" },
             { "any apa", "ini apa" },
             { "in knee apa", "ini apa" },
+            { "in knee upper", "ini apa" },
+            { "in knee opera", "ini apa" },
+            { "in knee papa", "ini apa" },
+            { "in knee up", "ini apa" },
+            { "in knee up a", "ini apa" },
+            { "any upper", "ini apa" },
+            { "any opera", "ini apa" },
+            { "any papa", "ini apa" },
+            { "any up", "ini apa" },
+            { "any up a", "ini apa" },
+            { "mini upper", "ini apa" },
+            { "mini opera", "ini apa" },
+            { "mini papa", "ini apa" },
+            { "teeny upper", "ini apa" },
+            { "penny upper", "ini apa" },
+            { "knee upper", "ini apa" },
+            { "knee up", "ini apa" },
+            { "in the upper", "ini apa" },
+            { "in upper", "ini apa" },
             { "ee knee ah pah", "ini apa" },
             { "ini a pa", "ini apa" },
             { "ini up a", "ini apa" },
             { "apa ini", "ini apa" },
+            { "upper any", "ini apa" },
+            { "upper in knee", "ini apa" },
+            { "upper mini", "ini apa" },
+            { "opera any", "ini apa" },
+            { "papa any", "ini apa" },
+            { "up a any", "ini apa" },
+            { "up in knee", "ini apa" },
             { "ah pah ee knee", "ini apa" },
             { "ah pah ini", "ini apa" },
             { "up a ini", "ini apa" },
@@ -74,13 +100,8 @@ namespace ByYourSight.InputSystem
             { "save object", "simpan objek" },
             { "save item", "simpan objek" },
 
-            // Anchor management: "Daftar simpanan" & "Hapus simpanan"
-            { "daftar simpanan", "daftar simpanan" },
-            { "lihat simpanan", "daftar simpanan" },
+            // Anchor management: "List saved" & "Clear saved"
             { "list saved", "daftar simpanan" },
-            { "hapus simpanan", "hapus simpanan" },
-            { "hapus semua", "hapus simpanan" },
-            { "reset simpanan", "hapus simpanan" },
             { "clear saved", "hapus simpanan" },
             { "delete saved", "hapus simpanan" },
 
@@ -132,10 +153,16 @@ namespace ByYourSight.InputSystem
         [Tooltip("Labels the user can tag in the real room (supports both Indonesian and English).")]
         public List<string> realWorldTagLabels = new List<string>
         {
-            "pintu", "rak", "tempat sampah", "hidran", "meja", "kursi", "jendela", "sofa", "tempat tidur", "lemari",
-            "wastafel", "tangga", "tas", "handphone", "botol minum", "botol", "cangkir", "gelas", "kunci", "kotak", "buku", "laptop",
-            "door", "shelf", "rack", "trash bin", "fire hydrant", "desk", "chair", "table", "window", "bed", "cabinet",
-            "sink", "stairs", "exit", "bag", "phone", "water bottle", "coffee mug", "house keys", "small box"
+            "pintu", "rak", "tempat sampah", "meja", "kursi", "tas", "handphone", "botol", "cangkir", "kunci", "buku", "laptop",
+            "door", "shelf", "trash bin", "desk", "chair", "bag", "phone", "water bottle", "coffee mug"
+        };
+
+        // Always use the focused core list when building the KeywordRecognizer grammar so serialized scene lists
+        // of 40+ items don't flood the recognizer with 300+ "cari ..." rules that hijack "ini apa".
+        private static readonly string[] CoreSpeechObjectTerms = new string[]
+        {
+            "pintu", "rak", "tempat sampah", "meja", "kursi", "tas", "handphone", "botol", "botol minum", "cangkir", "kunci", "buku", "laptop",
+            "door", "shelf", "trash bin", "desk", "chair", "bag", "phone", "water bottle", "coffee mug"
         };
 
         private string[] BuildVoiceVocabulary()
@@ -146,23 +173,12 @@ namespace ByYourSight.InputSystem
                 phrases.Add(key);
             }
 
-            // Collect clean object terms (avoiding 2-syllable phonetic fragments like "hah peh" / "sum pah"
-            // that cause the en-US acoustic model to misrecognize "ini apa" as "cari hape")
-            HashSet<string> objectTerms = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-            foreach (string raw in realWorldTagLabels)
-            {
-                if (!string.IsNullOrWhiteSpace(raw))
-                    objectTerms.Add(raw.Trim().ToLowerInvariant());
-            }
-
-            foreach (string item in objectTerms)
+            foreach (string item in CoreSpeechObjectTerms)
             {
                 // Indonesian prefixes
                 phrases.Add($"simpan {item}");
-                phrases.Add($"simpan objek {item}");
                 phrases.Add($"cari {item}");
                 phrases.Add($"antar ke {item}");
-                phrases.Add($"navigasi ke {item}");
 
                 // English fallback prefixes
                 phrases.Add($"save {item}");
@@ -219,7 +235,7 @@ namespace ByYourSight.InputSystem
                 _keywordRecognizer = new KeywordRecognizer(BuildVoiceVocabulary(), ConfidenceLevel.Low);
                 _keywordRecognizer.OnPhraseRecognized += args =>
                 {
-                    ProcessVoiceCommand(args.text);
+                    ProcessVoiceCommand(args.text, fromMicrophone: true);
                 };
                 _keywordRecognizer.Start();
                 Debug.Log("[Voice] Native HoloLens KeywordRecognizer started (Bilingual Indonesian Phonetic + English).");
@@ -254,7 +270,7 @@ namespace ByYourSight.InputSystem
         /// KF04: Main parser for processing Bahasa Indonesia (including phonetic spellings) & English voice commands
         /// (both from HoloLens native offline KeywordRecognizer and Editor simulation buttons).
         /// </summary>
-        public void ProcessVoiceCommand(string rawCommand)
+        public void ProcessVoiceCommand(string rawCommand, bool fromMicrophone = false)
         {
             if (string.IsNullOrWhiteSpace(rawCommand) || PriorityAudioManager.Instance == null)
                 return;
@@ -266,7 +282,7 @@ namespace ByYourSight.InputSystem
                 cmd = canonical;
             }
 
-            Debug.Log($"[Voice] Recognized: \"{rawCommand}\" -> \"{cmd}\"");
+            Debug.Log($"[Voice] Recognized: \"{rawCommand}\" -> \"{cmd}\" (fromMic={fromMicrophone})");
             PriorityAudioManager.Instance.PlayEarcon(EarconType.ListeningStart);
 
             // 1. "Diam" / "Mute" (KF06)
@@ -300,6 +316,11 @@ namespace ByYourSight.InputSystem
             // "Daftar simpanan" / "List saved"
             if (cmd == "daftar simpanan" || cmd == "list saved")
             {
+                if (fromMicrophone && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
+                {
+                    objectRecognizer.IdentifyObjectInGaze();
+                    return;
+                }
                 List<string> saved = objectRecognizer != null ? objectRecognizer.GetSavedLabels() : new List<string>();
                 PriorityAudioManager.Instance.EnqueueSpeech(
                     saved.Count == 0 ? "Belum ada objek tersimpan" : "Tersimpan: " + string.Join(", ", saved),
@@ -357,6 +378,13 @@ namespace ByYourSight.InputSystem
                 {
                     navigator.StartBeaconForObject(found);
                 }
+                else if (fromMicrophone && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
+                {
+                    // Windows en-US KeywordRecognizer often misrecognizes spoken Indonesian "ini apa" as "cari [item]".
+                    // If the target item wasn't saved and the user is pointing the camera at a live detected object,
+                    // identify the object in front of them!
+                    objectRecognizer.IdentifyObjectInGaze();
+                }
                 else
                 {
                     PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
@@ -379,7 +407,7 @@ namespace ByYourSight.InputSystem
                 else if (cmd.StartsWith("navigate to ")) dest = trimmed.Substring(12).Trim();
                 else dest = trimmed.Substring(11).Replace("the ", "").Trim();
 
-                navigator?.StartNavigationTo(dest);
+                navigator?.StartNavigationTo(dest, fromMicrophone);
                 return;
             }
 

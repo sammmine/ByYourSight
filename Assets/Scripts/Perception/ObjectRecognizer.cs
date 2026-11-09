@@ -216,6 +216,21 @@ namespace ByYourSight.Perception
             if (foundObject)
                 return true;
 
+            // Direct Camera AI Fallback: if http://127.0.0.1:8765 is actively detecting an object in the camera frame,
+            // return the most central detected object directly (handles webcam testing or head-pose stream lag)
+            RealWorldObjectDetector camDetector = FindObjectOfType<RealWorldObjectDetector>();
+            if (camDetector != null && camDetector.isServerConnected)
+            {
+                TrackableObject camObj = camDetector.GetMostCentralActiveDetection(4.0f);
+                if (camObj != null)
+                {
+                    bestTrackable = camObj;
+                    targetPoint = camObj.transform.position;
+                    targetDistance = Mathf.Clamp(Vector3.Distance(head.position, targetPoint), 0.5f, maxGazeDistance);
+                    return true;
+                }
+            }
+
             if (foundSurface)
             {
                 bestHit = closestSurfaceHit;
@@ -226,6 +241,12 @@ namespace ByYourSight.Perception
             }
 
             return false;
+        }
+
+        public bool HasActiveCameraObjectInView()
+        {
+            RealWorldObjectDetector camDetector = FindObjectOfType<RealWorldObjectDetector>();
+            return camDetector != null && camDetector.isServerConnected && camDetector.GetMostCentralActiveDetection(4.0f) != null;
         }
 
         /// <summary>

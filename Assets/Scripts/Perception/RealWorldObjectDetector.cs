@@ -81,6 +81,7 @@ namespace ByYourSight.Perception
             public string label;
             public bool isPerson;
             public float lastSeen;
+            public float lastCenterOffset;
             public int misses;
         }
 
@@ -415,6 +416,7 @@ namespace ByYourSight.Perception
                 }
 
                 t.lastSeen = Time.time;
+                t.lastCenterOffset = Vector2.Distance(new Vector2(d.cx, d.cy), new Vector2(0.5f, 0.5f));
                 t.misses = 0;
                 t.marker.detailedDescription = $"{Capitalize(label)} terdeteksi kamera, keyakinan {Mathf.RoundToInt(d.conf * 100f)} persen";
                 matched.Add(t);
@@ -437,6 +439,37 @@ namespace ByYourSight.Perception
                         RemoveAt(i);
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns the most central non-person object actively detected on the camera stream (http://127.0.0.1:8765)
+        /// within the last maxAgeSeconds. Prioritizes everyday handheld objects (phone, bottle, cup, book, etc.)
+        /// closest to the center of the camera frame (cx=0.5, cy=0.5).
+        /// </summary>
+        public TrackableObject GetMostCentralActiveDetection( float maxAgeSeconds = 4.0f)
+        {
+            TrackableObject best = null;
+            float bestScore = float.MaxValue;
+            float now = Time.time;
+
+            foreach (TrackedDetection t in _tracked)
+            {
+                if (t == null || t.isPerson || t.marker == null)
+                    continue;
+                if (now - t.lastSeen > maxAgeSeconds)
+                    continue;
+
+                // Prioritize EverydayObject (0) over background furniture/HazardObstacle (1), then camera center closeness
+                int catPriority = t.marker.category == SemanticObjectCategory.EverydayObject ? 0 : 1;
+                float score = catPriority * 10f + t.lastCenterOffset;
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = t.marker;
+                }
+            }
+
+            return best;
         }
 
         private TrackedDetection FindMatch(string label, Vector3 point, bool isPerson)
