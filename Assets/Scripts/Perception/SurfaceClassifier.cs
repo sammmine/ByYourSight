@@ -9,11 +9,11 @@ namespace ByYourSight.Perception
     /// </summary>
     public static class SurfaceClassifier
     {
-        public const string Floor = "Floor";
-        public const string Wall = "Wall";
-        public const string LowObstacle = "Low obstacle";
-        public const string OverheadObstacle = "Overhead obstacle";
-        public const string Obstacle = "Obstacle";
+        public const string Floor = "Lantai";
+        public const string Wall = "Dinding";
+        public const string LowObstacle = "Rintangan rendah";
+        public const string OverheadObstacle = "Rintangan atas";
+        public const string Obstacle = "Rintangan";
 
         private static float _cachedFloorY = float.NaN;
         private static float _floorSampleTime = -10f;

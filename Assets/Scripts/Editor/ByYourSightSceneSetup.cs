@@ -95,8 +95,8 @@ namespace ByYourSight.EditorTools
             // Remove floor collider from horizontal obstacle raycasts
             Object.DestroyImmediate(floor.GetComponent<Collider>());
 
-            // 3. Everyday Objects for KF01 ("What is this?"), KF02 ("Save object"), & KF03 ("Find...")
-            // Water bottle ahead of the user
+            // 3. Everyday Objects for KF01 ("Ini apa?"), KF02 ("Simpan objek"), & KF03 ("Cari...")
+            // Botol minum di depan pengguna
             CreateTrackablePrimitive(
                 PrimitiveType.Cylinder,
                 "Water_Bottle",
@@ -104,12 +104,12 @@ namespace ByYourSight.EditorTools
                 new Vector3(0f, 1.45f, -1.5f),
                 new Vector3(0.22f, 0.32f, 0.22f),
                 new Color(0.2f, 0.7f, 1f),
-                "Water bottle",
-                "Blue 600 milliliter water bottle",
+                "Botol minum",
+                "Botol air minum biru 600 mililiter",
                 SemanticObjectCategory.EverydayObject
             );
 
-            // Coffee mug on the right
+            // Cangkir di kanan
             CreateTrackablePrimitive(
                 PrimitiveType.Cylinder,
                 "Coffee_Mug",
@@ -117,12 +117,12 @@ namespace ByYourSight.EditorTools
                 new Vector3(1.8f, 1.35f, -1.8f),
                 new Vector3(0.24f, 0.2f, 0.24f),
                 new Color(0.85f, 0.55f, 0.25f),
-                "Coffee mug",
-                "Warm ceramic coffee mug on the right",
+                "Cangkir",
+                "Cangkir keramik hangat di sebelah kanan",
                 SemanticObjectCategory.EverydayObject
             );
 
-            // Unnamed/generic item on the left (for KF02 "Save object" demo)
+            // Kotak di kiri (untuk demo KF02 "Simpan objek")
             CreateTrackablePrimitive(
                 PrimitiveType.Cube,
                 "Item_On_Left",
@@ -130,12 +130,12 @@ namespace ByYourSight.EditorTools
                 new Vector3(-1.5f, 1.45f, -1.8f),
                 new Vector3(0.28f, 0.28f, 0.28f),
                 new Color(0.75f, 0.75f, 0.8f),
-                "Small box",
-                "Small storage box on the left",
+                "Kotak",
+                "Kotak penyimpanan kecil di sebelah kiri",
                 SemanticObjectCategory.EverydayObject
             );
 
-            // 4. Hazard Obstacles for KF07 (P0 Danger Alarm: "Warning! Pillar, 1 meter, ahead")
+            // 4. Hazard Obstacles for KF07 (P0 Danger Alarm: "Awas! Tiang, 1 meter, di depan")
             CreateTrackablePrimitive(
                 PrimitiveType.Cylinder,
                 "Support_Pillar",
@@ -143,8 +143,8 @@ namespace ByYourSight.EditorTools
                 new Vector3(-0.9f, 1.2f, 0.5f),
                 new Vector3(0.45f, 1.2f, 0.45f),
                 new Color(0.85f, 0.3f, 0.25f),
-                "Pillar",
-                "Concrete support pillar in the middle of the room",
+                "Tiang",
+                "Tiang penyangga beton di tengah ruangan",
                 SemanticObjectCategory.HazardObstacle
             );
 
@@ -155,12 +155,12 @@ namespace ByYourSight.EditorTools
                 new Vector3(1.2f, 0.6f, 0.8f),
                 new Vector3(0.65f, 0.6f, 0.65f),
                 new Color(0.7f, 0.4f, 0.2f),
-                "Chair",
-                "Wooden chair blocking the walkway",
+                "Kursi",
+                "Kursi kayu menghalangi jalur jalan",
                 SemanticObjectCategory.HazardObstacle
             );
 
-            // 5. Person Nearby for KF08 (P2 Social Info: "Person approaching, right")
+            // 5. Person Nearby for KF08 (P2 Social Info: "Orang mendekat, di kanan")
             CreateTrackablePrimitive(
                 PrimitiveType.Capsule,
                 "Nearby_Person",
@@ -168,12 +168,12 @@ namespace ByYourSight.EditorTools
                 new Vector3(2.4f, 1.1f, 1.2f),
                 new Vector3(0.55f, 1.0f, 0.55f),
                 new Color(0.4f, 0.85f, 0.55f),
-                "Person",
-                "Person nearby in the room",
+                "Orang",
+                "Seseorang berada di dekat Anda di dalam ruangan",
                 SemanticObjectCategory.Person
             );
 
-            // 6. Destinations & Waypoints for KF05 ("Navigate to Door" & "Navigate to Desk")
+            // 6. Destinations & Waypoints for KF05 ("Antar ke Pintu" & "Antar ke Meja")
             CreateTrackablePrimitive(
                 PrimitiveType.Cube,
                 "Exit_Door",
@@ -181,8 +181,8 @@ namespace ByYourSight.EditorTools
                 new Vector3(0f, 1.3f, 4.2f),
                 new Vector3(1.2f, 2.2f, 0.2f),
                 new Color(0.25f, 0.85f, 0.9f),
-                "Exit door",
-                "Room exit door at the front wall",
+                "Pintu",
+                "Pintu keluar ruangan di dinding depan",
                 SemanticObjectCategory.EverydayObject
             );
 
@@ -193,8 +193,8 @@ namespace ByYourSight.EditorTools
                 new Vector3(2.8f, 0.8f, 2.5f),
                 new Vector3(1.4f, 0.8f, 0.9f),
                 new Color(0.55f, 0.45f, 0.3f),
-                "Work desk",
-                "Work desk in the front-right corner",
+                "Meja kerja",
+                "Meja kerja di sudut kanan depan",
                 SemanticObjectCategory.EverydayObject
             );
 
@@ -254,12 +254,12 @@ namespace ByYourSight.EditorTools
             {
                 new NavigationDestination
                 {
-                    destinationName = "Door",
+                    destinationName = "Pintu",
                     waypoints = new List<Transform> { wpDoor1, wpDoor2 }
                 },
                 new NavigationDestination
                 {
-                    destinationName = "Desk",
+                    destinationName = "Meja",
                     waypoints = new List<Transform> { wpDesk1, wpDesk2 }
                 }
             };
@@ -278,7 +278,7 @@ namespace ByYourSight.EditorTools
             EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene());
             Selection.activeGameObject = coreSys;
 
-            Debug.Log("=== [By Your Sight] Native HoloLens (English) Prototype Scene (KF01 - KF08) built! Press PLAY (▶) to test. ===");
+            Debug.Log("=== [By Your Sight] Prototipe Bahasa Indonesia (KF01 - KF08) siap! Tekan PLAY (▶) untuk menguji. ===");
         }
 
         private static GameObject CreateTrackablePrimitive(

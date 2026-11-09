@@ -56,7 +56,7 @@ namespace ByYourSight.Navigation
         }
 
         /// <summary>
-        /// KF03: Starts guiding the user to locate an object using a Spatial Audio Beacon ("Find [object name]").
+        /// KF03: Starts guiding the user to locate an object using a Spatial Audio Beacon ("Cari [nama benda]").
         /// </summary>
         public void StartBeaconForObject(TrackableObject targetObj)
         {
@@ -66,27 +66,26 @@ namespace ByYourSight.Navigation
             StopNavigation(silent: true);
 
             currentBeaconTarget = targetObj.transform;
-            currentBeaconLabel = targetObj.labelName;
+            currentBeaconLabel = RealWorldObjectDetector.ToIndonesianLabel(targetObj.labelName);
             isBeaconActive = true;
             _hasAnnouncedAlignment = false;
 
             targetObj.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 6.0f);
 
             Transform head = Camera.main != null ? Camera.main.transform : transform;
-            float dist = Mathf.Max(0.5f, Mathf.Round(Vector3.Distance(head.position, targetObj.transform.position) * 2f) / 2f);
-            string meterUnit = Mathf.Approximately(dist, 1f) ? "meter" : "meters";
+            string distText = PriorityAudioManager.FormatDistance(Vector3.Distance(head.position, targetObj.transform.position));
             string dir = PriorityAudioManager.GetRelativeBodyDirection(head, targetObj.transform.position);
 
             PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, targetObj.transform.position);
             PriorityAudioManager.Instance.EnqueueSpeech(
-                $"{currentBeaconLabel}, {dist:0.#} {meterUnit}, {dir}. Turn your head",
+                $"{currentBeaconLabel}, {distText}, {dir}. Putar kepala Anda",
                 AudioPriority.P1_Navigation,
                 targetObj.transform.position
             );
         }
 
         /// <summary>
-        /// KF05: Starts waypoint route navigation toward a destination ("Navigate to [destination]").
+        /// KF05: Starts waypoint route navigation toward a destination ("Antar ke [tujuan]" / "Navigate to [destination]").
         /// </summary>
         public void StartNavigationTo(string queryDestination)
         {
@@ -94,27 +93,33 @@ namespace ByYourSight.Navigation
                 return;
 
             string q = queryDestination.Trim().ToLowerInvariant();
+            string qIndo = RealWorldObjectDetector.ToIndonesianLabel(q);
             List<Transform> route = null;
-            string routeName = queryDestination.Trim();
+            string routeName = qIndo;
 
-            // 1. Real room: a place the user tagged with "Save [label]" (straight-line guidance to that tag)
+            // 1. Real room: a place the user tagged with "Simpan [label]" / "Save [label]" (straight-line guidance to that tag)
             ObjectRecognizer recognizer = FindObjectOfType<ObjectRecognizer>();
             TrackableObject savedTag = recognizer != null ? recognizer.FindObjectByName(q) : null;
             if (savedTag != null)
             {
                 route = new List<Transform> { savedTag.transform };
-                routeName = savedTag.labelName;
+                routeName = RealWorldObjectDetector.ToIndonesianLabel(savedTag.labelName);
             }
             else
             {
                 // 2. Simulated room: predefined waypoint graph, only while the simulated room is visible.
-                //    In Real Room mode these waypoints are hidden coordinates that don't match the real room.
-                NavigationDestination found = destinations.Find(d => d.destinationName.ToLowerInvariant().Contains(q));
+                NavigationDestination found = destinations.Find(d =>
+                {
+                    string dRaw = d.destinationName.ToLowerInvariant();
+                    string dIndo = RealWorldObjectDetector.ToIndonesianLabel(d.destinationName).ToLowerInvariant();
+                    return dRaw.Contains(q) || q.Contains(dRaw) ||
+                           dIndo.Contains(qIndo.ToLowerInvariant()) || qIndo.ToLowerInvariant().Contains(dIndo);
+                });
                 if (found != null && found.waypoints.Count > 0 &&
                     found.waypoints.TrueForAll(w => w != null && w.gameObject.activeInHierarchy))
                 {
                     route = new List<Transform>(found.waypoints);
-                    routeName = found.destinationName;
+                    routeName = RealWorldObjectDetector.ToIndonesianLabel(found.destinationName);
                 }
             }
 
@@ -122,7 +127,7 @@ namespace ByYourSight.Navigation
             {
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"{routeName} not saved yet. Face it and say Save {routeName}",
+                    $"{routeName} belum disimpan. Arahkan pandangan lalu ucapkan Simpan {routeName}",
                     AudioPriority.P1_Navigation
                 );
                 return;
@@ -137,7 +142,7 @@ namespace ByYourSight.Navigation
 
             PriorityAudioManager.Instance.PlayEarcon(EarconType.Success);
             PriorityAudioManager.Instance.EnqueueSpeech(
-                $"Navigating to {activeDestinationName}",
+                $"Mengantar ke {activeDestinationName}",
                 AudioPriority.P1_Navigation
             );
         }
@@ -153,7 +158,7 @@ namespace ByYourSight.Navigation
             if (announce && wasActive && PriorityAudioManager.Instance != null)
             {
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.ListeningEnd);
-                PriorityAudioManager.Instance.EnqueueSpeech("Guidance cancelled", AudioPriority.P3_ObjectIdentity);
+                PriorityAudioManager.Instance.EnqueueSpeech("Panduan dibatalkan", AudioPriority.P3_ObjectIdentity);
             }
         }
 
@@ -163,7 +168,7 @@ namespace ByYourSight.Navigation
             _activeRoute.Clear();
             if (!silent && PriorityAudioManager.Instance != null)
             {
-                PriorityAudioManager.Instance.EnqueueSpeech("Navigation stopped", AudioPriority.P1_Navigation);
+                PriorityAudioManager.Instance.EnqueueSpeech("Navigasi dihentikan", AudioPriority.P1_Navigation);
             }
         }
 
@@ -185,7 +190,7 @@ namespace ByYourSight.Navigation
                 isBeaconActive = false;
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, currentBeaconTarget.position);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"{currentBeaconLabel} is right in front of you",
+                    $"{currentBeaconLabel} tepat di depan Anda",
                     AudioPriority.P1_Navigation,
                     currentBeaconTarget.position
                 );
@@ -217,9 +222,8 @@ namespace ByYourSight.Navigation
             {
                 _hasAnnouncedAlignment = true;
                 int meters = Mathf.Max(1, Mathf.RoundToInt(distance));
-                string meterUnit = meters == 1 ? "meter" : "meters";
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Straight ahead, {meters} {meterUnit}",
+                    $"Lurus di depan, {meters} meter",
                     AudioPriority.P1_Navigation,
                     currentBeaconTarget.position
                 );
@@ -259,7 +263,7 @@ namespace ByYourSight.Navigation
                     isNavigationActive = false;
                     PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, targetWp.position);
                     PriorityAudioManager.Instance.EnqueueSpeech(
-                        $"Arrived at {activeDestinationName}",
+                        $"Sampai di {activeDestinationName}",
                         AudioPriority.P1_Navigation,
                         targetWp.position
                     );
@@ -282,19 +286,18 @@ namespace ByYourSight.Navigation
 
                 float signedAngle = Vector3.SignedAngle(forward.normalized, toWp.normalized, Vector3.up);
                 int meters = Mathf.Max(1, Mathf.RoundToInt(dist));
-                string meterUnit = meters == 1 ? "meter" : "meters";
 
                 string turnCommand;
                 if (Mathf.Abs(signedAngle) <= 22f)
-                    turnCommand = $"Go straight, {meters} {meterUnit}";
+                    turnCommand = $"Jalan lurus, {meters} meter";
                 else if (signedAngle > 22f && signedAngle <= 65f)
-                    turnCommand = $"Bear right, {meters} {meterUnit}";
+                    turnCommand = $"Serong kanan, {meters} meter";
                 else if (signedAngle > 65f)
-                    turnCommand = $"Turn right, {meters} {meterUnit}";
+                    turnCommand = $"Belok kanan, {meters} meter";
                 else if (signedAngle < -22f && signedAngle >= -65f)
-                    turnCommand = $"Bear left, {meters} {meterUnit}";
+                    turnCommand = $"Serong kiri, {meters} meter";
                 else
-                    turnCommand = $"Turn left, {meters} {meterUnit}";
+                    turnCommand = $"Belok kiri, {meters} meter";
 
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.SpatialBeacon, targetWp.position, 1.15f);
                 PriorityAudioManager.Instance.EnqueueSpeech(

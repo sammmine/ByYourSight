@@ -22,17 +22,17 @@ Nama **"By Your Sight"** memiliki makna ganda: *"By Your Side"* (selalu mendampi
 
 ## 1. Prinsip Desain & Hierarki Prioritas Audio
 
-- **Audio-first, visual-assist:** Semua informasi primer disampaikan via audio spasial 3D. Tampilan visual kontras tinggi pada layar *additive* HoloLens 2 bertindak sebagai penguat sisa penglihatan pengguna (*Kuning = Info/Target, Merah/Oranye = Bahaya, Hijau = Sukses*).
-- **Singkat dulu, detail jika diminta:** Pola kalimat singkat `[What] + [Distance] + [Direction]` (maksimal 6–8 kata, mengacu arah tubuh: *ahead*, *slightly right*, *right*, *slightly left*, *left*, *behind*). Detail lengkap diucapkan jika pengguna meminta `"Details"`.
-- **Adaptasi terhadap lingkungan:** Volume audio otomatis beradaptasi terhadap kebisingan sekitar serta mendukung perintah *Mute* cepat.
+- **Audio-first, visual-assist (Bahasa Indonesia):** Semua informasi primer disampaikan via audio spasial 3D dalam **Bahasa Indonesia**. Tampilan visual kontras tinggi pada layar *additive* HoloLens 2 bertindak sebagai penguat sisa penglihatan pengguna (*Kuning = Info/Target, Merah/Oranye = Bahaya, Hijau = Sukses*).
+- **Singkat dulu, detail jika diminta:** Pola kalimat singkat `[Apa] + [Jarak] + [Arah]` (maksimal 6–8 kata, mengacu arah tubuh: *di depan*, *agak kanan*, *di kanan*, *agak kiri*, *di kiri*, *di belakang*). Detail lengkap diucapkan jika pengguna meminta `"Detail"`.
+- **Adaptasi terhadap lingkungan:** Volume audio otomatis beradaptasi terhadap kebisingan sekitar serta mendukung perintah *Diam* (*Mute*) cepat.
 - **Keselamatan di atas segalanya:** Seluruh output suara dikelola satu gerbang prioritas terpusat (`PriorityAudioManager`):
 
-| Prioritas | Jenis Informasi | Contoh Output Suara | Perilaku Antrian |
+| Prioritas | Jenis Informasi | Contoh Output Suara (Bahasa Indonesia) | Perilaku Antrian |
 | :--- | :--- | :--- | :--- |
-| **P0** | Alarm Bahaya (KF07) | *"Warning! Pillar, 1 meter, ahead"* | Memotong semua audio lain seketika, **kebal terhadap Mute**, disertai *double-beep* tajam. |
-| **P1** | Instruksi Rute & Navigasi (KF03, KF05) | *"Turn left, 2 meters"* / *"Straight ahead, 2 meters"* | Menunda P2 dan P3; memperbarui instruksi arah rute. |
-| **P2** | Informasi Sosial (KF08) | *"Person approaching, right"* | Diantrikan di bawah P0 & P1; menjaga privasi tanpa merekam identitas wajah. |
-| **P3** | Identifikasi Objek (KF01, KF02) | *"Water bottle, 1.5 meters, ahead"* | Diantrikan paling akhir; dapat dibisukan (*mute*) kapan saja. |
+| **P0** | Alarm Bahaya (KF07) | *"Awas! Tiang, 1 meter, di depan"* | Memotong semua audio lain seketika, **kebal terhadap Mute**, disertai *double-beep* tajam. |
+| **P1** | Instruksi Rute & Navigasi (KF03, KF05) | *"Belok kiri, 2 meter"* / *"Jalan lurus, 2 meter"* | Menunda P2 dan P3; memperbarui instruksi arah rute. |
+| **P2** | Informasi Sosial (KF08) | *"Orang mendekat, di kanan"* | Diantrikan di bawah P0 & P1; menjaga privasi tanpa merekam identitas wajah. |
+| **P3** | Identifikasi Objek (KF01, KF02) | *"Botol minum, 1 setengah meter, di depan"* | Diantrikan paling akhir; dapat dibisukan (*mute*) kapan saja. |
 
 ---
 
@@ -241,20 +241,20 @@ Metode ini menjalankan aplikasi di laptop dan melakukan streaming audio-visual s
 
 ## 7. Fitur Persepsi & Spatial Anchoring Permanen
 
-### A. Fitur "Save Object" Permanen
+### A. Fitur "Simpan Objek" (*Save Object*) Permanen
 Pengguna dapat menandai benda atau perabot di dunia nyata dan menyimpannya secara permanen:
 1. Tatap objek yang dituju (misal rak, tempat sampah, atau pintu).
-2. Ucapkan perintah suara: **`"Save object shelf"`** (atau *"Save shelf"*, *"Save door"*, *"Save trash bin"*).
-3. HoloLens menembakkan raycast LiDAR ke permukaan benda, memunculkan kotak kawat hijau 3D, dan membunyikan earcon konfirmasi.
+2. Ucapkan perintah suara: **`"Simpan rak"`** / **`"Simpan objek rak"`** (atau *"Simpan pintu"*, *"Simpan tempat sampah"*, maupun dalam Bahasa Inggris *"Save shelf"*).
+3. HoloLens menembakkan raycast LiDAR ke permukaan benda, memunculkan kotak kawat hijau 3D, dan membunyikan earcon konfirmasi (*"Tersimpan, Rak"*).
 4. **Auto-Persist ke Disk:** Posisi 3D objek langsung ditulis ke storage lokal:
    `Application.persistentDataPath/saved_spatial_anchors.json`.
 5. **Auto-Restore saat Aplikasi Dibuka Kembali:** Saat HoloLens dimatikan dan aplikasi dibuka lagi di lain hari, semua objek yang pernah Anda simpan otomatis dipulihkan kembali ke posisinya!
 
 ### B. Perintah Pengelolaan Objek Tersimpan:
-* **`"List saved"`** : Menyebutkan semua label objek yang sedang tersimpan di ruangan.
-* **`"Clear saved"`** : Menghapus seluruh data anchor objek dari memori dan file disk.
-* **`"Find [nama]"`** : Mengaktifkan Spatial Audio Beacon untuk menuntun kepala pengguna ke objek tersebut.
-* **`"Navigate to [tujuan]"`** : Memandu rute jalan setapak demi setapak ke tujuan.
+* **`"Daftar simpanan"`** (*"List saved"*) : Menyebutkan semua label objek yang sedang tersimpan di ruangan.
+* **`"Hapus semua"`** (*"Clear saved"*) : Menghapus seluruh data anchor objek dari memori dan file disk.
+* **`"Cari [nama]"`** (*"Find [nama]"*) : Mengaktifkan Spatial Audio Beacon untuk menuntun kepala pengguna ke objek tersebut.
+* **`"Antar ke [tujuan]"`** (*"Navigate to [tujuan]"*) : Memandu rute jalan setapak demi setapak ke tujuan.
 
 ### C. Deteksi Rintangan Cerdas & Anti-Spam
 Modul [`ObstacleDetector.cs`](file:///Users/lanaginting/Documents/by-your-sight/ByYourSight/Assets/Scripts/Safety/ObstacleDetector.cs) dilengkapi mekanisme perlindungan anti-overstimulation:
@@ -265,26 +265,30 @@ Modul [`ObstacleDetector.cs`](file:///Users/lanaginting/Documents/by-your-sight/
 
 ---
 
-## 8. Kosakata Lengkap Perintah Suara (Voice Commands)
+## 8. Kosakata Lengkap Perintah Suara (Bilingual: Bahasa Indonesia + Phonetic + Inggris)
 
-Daftar perintah suara *offline* (Bahasa Inggris native HoloLens 2 via Windows KeywordRecognizer):
+Karena mesin *offline* `KeywordRecognizer` pada HoloLens 2 menggunakan model akustik Bahasa Inggris (`en-US`), sistem ini mendaftarkan **kosakata Bahasa Indonesia beserta ejaan fonetiknya** (mis. *"ini apa"*, *"inny apa"*, *"cari"*, *"chah ree"*, *"simpan"*, *"seem pan"*) dengan tingkat toleransi `ConfidenceLevel.Low`, sekaligus tetap menerima perintah Bahasa Inggris dan tombol pintas *Wizard of Oz* untuk fasilitator pengujian:
 
-| Perintah Suara (Speech) | Pintasan Keyboard | Kebutuhan Fungsional | Contoh Respon Audio Sistem |
+| Perintah Suara (Bahasa Indonesia / Inggris) | Pintasan Keyboard | Kebutuhan Fungsional | Contoh Respon Audio Sistem (Bahasa Indonesia) |
 | :--- | :---: | :--- | :--- |
-| **"What is this?"** / **"Identify"** | `1` | KF01: Identifikasi Objek | *"Water bottle, 1.5 meters, ahead"* |
-| **"Save object [label]"** / **"Save [label]"** | `2` | KF02: Simpan Benda Permanen | *"Saved, Shelf"* (tersimpan ke disk) |
-| **"Find Water bottle"** | `3` | KF03: Spatial Audio Beacon | *"Water bottle, 2 meters, ahead. Turn your head"* |
-| **"Find Coffee mug"** | `4` | KF03: Spatial Audio Beacon | *"Coffee mug, 2.5 meters, slightly right"* |
-| **"Find Shelf"** / **"Find [item]"** | — | KF03: Cari Objek Tersimpan | Mengaktifkan nada ketukan 3D audio beacon |
-| **"Navigate to Door"** | `5` | KF05: Navigasi Waypoint | *"Navigating to Door"* → *"Go straight, 3 meters"* |
-| **"Navigate to Desk"** | `6` | KF05: Navigasi Waypoint | *"Navigating to Desk"* → *"Bear right, 2 meters"* |
-| **"List saved"** | — | Pengelolaan Anchor | *"Saved: shelf, door, trash bin"* |
-| **"Clear saved"** | — | Pengelolaan Anchor | *"All saved items cleared"* |
-| **"Repeat"** | `7` | Kontrol Audio | Mengulangi kalimat informasi terakhir |
-| **"Details"** | `8` | Kontrol Audio | Menyebutkan deskripsi lengkap objek |
-| **"Cancel"** / **"Stop"** | `9` | Kontrol Navigasi | *"Guidance cancelled"* |
-| **"Mute"** / **"Resume"** | `M` | KF06: Kontrol Mute Cepat | Membisukan P1–P3 (P0 tetap aktif) / *"Audio resumed"* |
-| **"Help"** | — | Panduan Pengguna | *"Say: What is this, Find item, Navigate to door, or Mute"* |
+| **"Ini apa"** / **"Apa ini"** / *"What is this"* | `1` | KF01: Identifikasi Objek | *"Botol minum, 1 setengah meter, di depan"* |
+| **"Simpan [nama]"** / **"Simpan objek [nama]"** | `2` | KF02: Simpan Benda Permanen | *"Tersimpan, Rak"* (tersimpan ke disk) |
+| **"Cari botol"** / *"Find water bottle"* | `3` | KF03: Spatial Audio Beacon | *"Botol minum, 2 meter, di depan. Putar kepala Anda"* |
+| **"Cari cangkir"** / **"Cari gelas"** | `4` | KF03: Spatial Audio Beacon | *"Cangkir, 2 setengah meter, agak kanan"* |
+| **"Cari rak"** / **"Cari [nama]"** | — | KF03: Cari Objek Tersimpan | Mengaktifkan nada ketukan 3D audio beacon |
+| **"Antar ke pintu"** / **"Ke pintu"** | `5` | KF05: Navigasi Waypoint | *"Mengantar ke Pintu"* → *"Jalan lurus, 3 meter"* |
+| **"Antar ke meja"** / **"Ke meja"** | `6` | KF05: Navigasi Waypoint | *"Mengantar ke Meja"* → *"Serong kanan, 2 meter"* |
+| **"Daftar simpanan"** / *"List saved"* | — | Pengelolaan Anchor | *"Tersimpan: Rak, Pintu, Tempat sampah"* |
+| **"Hapus semua"** / *"Clear saved"* | — | Pengelolaan Anchor | *"Semua simpanan dihapus"* |
+| **"Ulangi"** / *"Repeat"* | `7` | Kontrol Audio | Mengulangi kalimat informasi terakhir |
+| **"Detail"** / *"Details"* | `8` | Kontrol Audio | Menyebutkan deskripsi lengkap objek |
+| **"Batal"** / **"Berhenti"** / *"Stop"* | `9` | Kontrol Navigasi | *"Panduan dibatalkan"* |
+| **"Diam"** / **"Lanjut"** / *"Mute"* | `M` | KF06: Kontrol Mute Cepat | *"Audio dibisukan"* (P0 tetap aktif) / *"Audio aktif"* |
+| **"Bantuan"** / **"Tolong"** / *"Help"* | — | Panduan Pengguna | *"Katakan: Ini apa, Cari objek, Antar ke pintu, atau Diam"* |
+
+> **Tips Aksentuasi Suara Bahasa Indonesia:**
+> - **Di macOS:** Sistem otomatis menggunakan suara native Bahasa Indonesia **`Damayanti`**.
+> - **Di Windows 10/11 (Holographic Remoting / UWP):** Sistem otomatis mencari suara Bahasa Indonesia (`id-ID` / *Microsoft Andika*). Agar logat pengucapan Bahasa Indonesia di laptop Windows terdengar 100% natural, buka **Windows Settings > Time & Language > Language & Region > Add a language > Bahasa Indonesia** (centang opsi *Text-to-speech*).
 
 ---
 
@@ -295,16 +299,16 @@ Semua kode sumber utama berada di dalam folder `Assets/Scripts/`:
 ```
 Assets/Scripts/
 ├── Audio/
-│   └── PriorityAudioManager.cs       # Gerbang antrian P0-P3, sintesis earcon, native TTS
+│   └── PriorityAudioManager.cs       # Gerbang antrian P0-P3, sintesis earcon, native TTS (ID)
 ├── Input/
-│   └── VoiceAndGestureController.cs  # Parser KeywordRecognizer, kontrol gestur, simulator HUD
+│   └── VoiceAndGestureController.cs  # Parser KeywordRecognizer bilingual/fonetik, kontrol gestur, HUD
 ├── Navigation/
 │   └── SpatialBeaconAndNavigator.cs  # Audio Beacon 15° (KF03) & Rute Waypoint (KF05)
 ├── Perception/
 │   ├── ObjectRecognizer.cs          # Gaze identification (KF01), persistent saving (KF02), social info (KF08)
-│   ├── RealWorldObjectDetector.cs   # Client penerima deteksi YOLO dari server laptop
+│   ├── RealWorldObjectDetector.cs   # Client penerima deteksi YOLO & kamus terjemahan Bahasa Indonesia
 │   ├── TrackableObject.cs           # Metadata objek & visual bounding box kontras tinggi
-│   └── SurfaceClassifier.cs         # Klasifikasi permukaan Spatial Mesh (Floor, Wall, Ceiling)
+│   └── SurfaceClassifier.cs         # Klasifikasi permukaan Spatial Mesh (Lantai, Dinding, Rintangan)
 ├── Safety/
 │   └── ObstacleDetector.cs          # Sensor bahaya rintangan 150ms latensi (KF07)
 └── Editor/
@@ -318,9 +322,10 @@ Assets/Scripts/
 | Masalah | Kemungkinan Penyebab | Solusi |
 | :--- | :--- | :--- |
 | **`cannot open camera stream`** di terminal Python | IP, username, atau password Device Portal salah, atau Device Portal belum diaktifkan di HoloLens. | Buka `https://<IP-HoloLens>` di browser laptop untuk memastikan autentikasi dan stream kamera berfungsi di menu *Views > Mixed Reality Capture*. |
-| **Camera AI: OFF** di layar Unity | Server Python belum dijalankan. | Buka terminal dan jalankan `python detection_server.py --source 0` (webcam) atau dengan parameter `--portal`. |
+| **Kamera AI: OFF** di layar Unity | Server Python belum dijalankan. | Buka terminal dan jalankan `python detection_server.py --source 0` (webcam) atau dengan parameter `--portal`. |
 | **Kotak hologram bergeser saat kepala menoleh** | Perbedaan latensi stream video jaringan Wi-Fi. | Atur nilai **`Stream Latency Seconds`** di Inspector `RealWorldObjectDetector` (naikkan jika tertinggal, turunkan jika mendahului, default: `0.8`–`1.2` detik). |
-| **"Find [item]" menjawab *"not saved yet"*** | Objek belum pernah disimpan dengan perintah *"Save object [item]"*. | Tatap objek tersebut lalu katakan *"Save object [nama]"* atau simpan melalui panel HUD. |
-| **Suara perintah suara tidak merespon di HoloLens** | Bahasa sistem bukan English (US) atau izin Microphone belum aktif. | Di HoloLens: ubah **Settings > Time & Language > Speech** ke **English (United States)**, dan pastikan capability *Microphone* dicentang di Player Settings. |
-| **Objek rak terbaca kulkas (*refrigerator*)** | Dataset standar COCO tidak memiliki kelas `shelf`. | Fitur auto-remapping sudah terpasang di `detection_server.py` dan `RealWorldObjectDetector.cs`. Jalankan server dengan versi terbaru. |
+| **"Cari [nama]" menjawab *"belum tersimpan"*** | Objek belum pernah disimpan dengan perintah *"Simpan [nama]"*. | Tatap objek tersebut lalu katakan *"Simpan [nama]"* atau simpan melalui panel HUD. |
+| **Suara perintah suara tidak merespon di HoloLens** | Bahasa sistem bukan English (US) atau izin Microphone belum aktif. | Di HoloLens: pastikan **Settings > Time & Language > Speech** tetap diatur ke **English (United States)** (karena ejaan fonetik Bahasa Indonesia dipetakan ke model `en-US`), atau gunakan tombol pintas keyboard `1`–`9` dari laptop saat *Holographic Remoting*. |
+| **Logat suara TTS di Windows terdengar seperti aksen Inggris** | Paket suara *Text-to-speech* Bahasa Indonesia (*Microsoft Andika*) belum diinstal di Windows. | Buka **Windows Settings > Time & Language > Language & Region > Add a language > Bahasa Indonesia** dan centang *Text-to-speech*. |
+| **Objek rak terbaca kulkas (*refrigerator*)** | Dataset standar COCO tidak memiliki kelas `shelf`. | Fitur auto-remapping sudah terpasang di `detection_server.py` (`refrigerator -> shelf`) dan diterjemahkan menjadi **`Rak`** di Unity. |
 | **Preview webcam terasa lambat (FPS rendah)** | Penggunaan model berat atau inferensi CPU. | Model default sudah menggunakan `yolo11s.pt`. Jika laptop memiliki kartu grafis NVIDIA, tambahkan opsi `--device 0`. |

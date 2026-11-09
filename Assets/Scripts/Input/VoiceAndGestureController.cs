@@ -40,67 +40,186 @@ namespace ByYourSight.InputSystem
 
         private float _yaw = 0f;
         private float _pitch = 0f;
-        private string _customCommandInput = "Find Water bottle";
-        private string _customSaveLabel = "House Keys";
+        private string _customCommandInput = "Cari Botol minum";
+        private string _customSaveLabel = "Kunci";
         private RealWorldObjectDetector _objectDetector;
+
+        // Maps phonetic/variant spoken phrases -> canonical Indonesian command
+        private readonly Dictionary<string, string> _phoneticCommandAliases = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
+        {
+            // KF01: "Ini apa?"
+            { "ini apa", "ini apa" },
+            { "inny apa", "ini apa" },
+            { "ee knee ah pah", "ini apa" },
+            { "apa ini", "ini apa" },
+            { "ah pah ee knee", "ini apa" },
+            { "lihat depan", "ini apa" },
+            { "what is this", "ini apa" },
+            { "identify", "ini apa" },
+
+            // KF02: "Simpan objek" (uses HUD label if no object specified)
+            { "simpan objek", "simpan objek" },
+            { "seem pan objek", "simpan objek" },
+            { "simpan benda", "simpan objek" },
+            { "seem pan benda", "simpan objek" },
+            { "save object", "simpan objek" },
+            { "save item", "simpan objek" },
+
+            // Anchor management: "Daftar simpanan" & "Hapus simpanan"
+            { "daftar simpanan", "daftar simpanan" },
+            { "lihat simpanan", "daftar simpanan" },
+            { "list saved", "daftar simpanan" },
+            { "hapus simpanan", "hapus simpanan" },
+            { "reset simpanan", "hapus simpanan" },
+            { "clear saved", "hapus simpanan" },
+            { "delete saved", "hapus simpanan" },
+
+            // Audio control: "Ulangi" & "Detail"
+            { "ulangi", "ulangi" },
+            { "oo lung ee", "ulangi" },
+            { "oo lang ee", "ulangi" },
+            { "ulang", "ulangi" },
+            { "repeat", "ulangi" },
+            { "detail", "detail" },
+            { "dee tail", "detail" },
+            { "rincian", "detail" },
+            { "jelaskan", "detail" },
+            { "details", "detail" },
+
+            // KF06: "Diam" & "Lanjut"
+            { "diam", "diam" },
+            { "dee um", "diam" },
+            { "dee am", "diam" },
+            { "hening", "diam" },
+            { "bisukan", "diam" },
+            { "mute", "diam" },
+            { "quiet", "diam" },
+            { "lanjut", "lanjut" },
+            { "lun jut", "lanjut" },
+            { "lan joot", "lanjut" },
+            { "suara", "lanjut" },
+            { "resume", "lanjut" },
+            { "unmute", "lanjut" },
+
+            // Navigation control: "Batal" / "Berhenti" & "Bantuan"
+            { "batal", "batal" },
+            { "bah tal", "batal" },
+            { "berhenti", "batal" },
+            { "stop", "batal" },
+            { "cancel", "batal" },
+            { "bantuan", "bantuan" },
+            { "bun too un", "bantuan" },
+            { "ban too an", "bantuan" },
+            { "tolong", "bantuan" },
+            { "help", "bantuan" }
+        };
 
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
         private KeywordRecognizer _keywordRecognizer;
-        private readonly string[] _nativeHoloLensKeywords = new string[]
-        {
-            "What is this",
-            "Identify",
-            "Save object",
-            "Save item",
-            "List saved",
-            "Clear saved",
-            "Repeat",
-            "Details",
-            "Mute",
-            "Quiet",
-            "Resume",
-            "Unmute",
-            "Cancel",
-            "Stop",
-            "Help"
-        };
 #endif
 
-        [Header("Real-Room Tagging (Save -> Find / Navigate)")]
-        [Tooltip("Labels the user can tag in the real room. Each label generates the voice phrases " +
-                 "\"Save X\", \"Find X\", \"Navigate to X\" and \"Take me to the X\" (KeywordRecognizer needs fixed phrases).")]
+        [Header("Real-Room Tagging (Simpan -> Cari / Antar ke)")]
+        [Tooltip("Labels the user can tag in the real room (supports both Indonesian and English).")]
         public List<string> realWorldTagLabels = new List<string>
         {
-            "door", "shelf", "rack", "trash bin", "fire hydrant", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
-            "sink", "stairs", "exit", "bag", "phone", "water bottle", "coffee mug",
-            "house keys", "small box"
+            "pintu", "rak", "tempat sampah", "hidran", "meja", "kursi", "jendela", "sofa", "tempat tidur", "lemari",
+            "wastafel", "tangga", "tas", "handphone", "botol minum", "cangkir", "kunci", "kotak", "buku", "laptop",
+            "door", "shelf", "rack", "trash bin", "fire hydrant", "desk", "chair", "table", "window", "bed", "cabinet",
+            "sink", "stairs", "exit", "bag", "phone", "water bottle", "coffee mug", "house keys", "small box"
         };
 
-        // Labels the camera detection server (Opsi 2) can produce. Always in the vocabulary, even when the
-        // scene has an older saved copy of realWorldTagLabels.
-        private static readonly string[] CameraDetectableLabels =
+        // Bilingual + Phonetic object variants for Windows KeywordRecognizer (en-US acoustic engine)
+        private static readonly string[,] ObjectPhoneticVariants = new string[,]
         {
-            "person", "chair", "table", "sofa", "bed", "toilet", "laptop", "book", "television", "plant",
-            "bag", "phone", "water bottle", "coffee mug", "trash bin", "door", "stairs", "shelf", "rack"
+            { "pintu", "peen too" },
+            { "pintu", "pin too" },
+            { "pintu", "door" },
+            { "meja", "may jah" },
+            { "meja", "meh ja" },
+            { "meja", "desk" },
+            { "meja", "table" },
+            { "kursi", "koor see" },
+            { "kursi", "chair" },
+            { "rak", "ruck" },
+            { "rak", "shelf" },
+            { "rak", "rack" },
+            { "tempat sampah", "sampah" },
+            { "tempat sampah", "sum pah" },
+            { "tempat sampah", "trash bin" },
+            { "botol minum", "botol" },
+            { "botol minum", "bo tol" },
+            { "botol minum", "water bottle" },
+            { "cangkir", "chung keer" },
+            { "cangkir", "gelas" },
+            { "cangkir", "guh las" },
+            { "cangkir", "coffee mug" },
+            { "kunci", "koon chee" },
+            { "kunci", "house keys" },
+            { "tas", "tuss" },
+            { "tas", "bag" },
+            { "handphone", "hape" },
+            { "handphone", "hah peh" },
+            { "handphone", "ponsel" },
+            { "handphone", "phone" },
+            { "buku", "boo koo" },
+            { "buku", "book" },
+            { "kotak", "ko tak" },
+            { "kotak", "small box" },
+            { "hidran", "hee drun" },
+            { "hidran", "fire hydrant" },
+            { "tangga", "tung gah" },
+            { "tangga", "stairs" },
+            { "lemari", "luh mah ree" },
+            { "lemari", "cabinet" },
+            { "tempat tidur", "kasur" },
+            { "tempat tidur", "kah soor" },
+            { "tempat tidur", "bed" },
+            { "sofa", "sofa" },
+            { "laptop", "laptop" },
+            { "jendela", "window" }
         };
 
         private string[] BuildVoiceVocabulary()
         {
-            HashSet<string> phrases = new HashSet<string>();
-#if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
-            foreach (string p in _nativeHoloLensKeywords) phrases.Add(p);
-#endif
-            List<string> allLabels = new List<string>(realWorldTagLabels);
-            allLabels.AddRange(CameraDetectableLabels);
-            foreach (string raw in allLabels)
+            HashSet<string> phrases = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (string key in _phoneticCommandAliases.Keys)
             {
-                if (string.IsNullOrWhiteSpace(raw)) continue;
-                string label = raw.Trim().ToLowerInvariant();
-                phrases.Add($"Save {label}");
-                phrases.Add($"Find {label}");
-                phrases.Add($"Navigate to {label}");
-                phrases.Add($"Take me to the {label}");
+                phrases.Add(key);
             }
+
+            // Collect all object spoken variants (Indonesian, Phonetic, and English)
+            HashSet<string> objectTerms = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (string raw in realWorldTagLabels)
+            {
+                if (!string.IsNullOrWhiteSpace(raw))
+                    objectTerms.Add(raw.Trim().ToLowerInvariant());
+            }
+            int variantCount = ObjectPhoneticVariants.GetLength(0);
+            for (int i = 0; i < variantCount; i++)
+            {
+                objectTerms.Add(ObjectPhoneticVariants[i, 0]);
+                objectTerms.Add(ObjectPhoneticVariants[i, 1]);
+            }
+
+            foreach (string item in objectTerms)
+            {
+                // Indonesian + Phonetic prefixes
+                phrases.Add($"simpan {item}");
+                phrases.Add($"seem pan {item}");
+                phrases.Add($"cari {item}");
+                phrases.Add($"chah ree {item}");
+                phrases.Add($"cha ree {item}");
+                phrases.Add($"antar ke {item}");
+                phrases.Add($"un tar ke {item}");
+                phrases.Add($"navigasi ke {item}");
+
+                // English fallback prefixes
+                phrases.Add($"save {item}");
+                phrases.Add($"find {item}");
+                phrases.Add($"navigate to {item}");
+                phrases.Add($"take me to the {item}");
+            }
+
             return new List<string>(phrases).ToArray();
         }
 
@@ -130,12 +249,12 @@ namespace ByYourSight.InputSystem
 
             InitializeNativeHoloLensSpeech();
 
-            // Startup audio greeting
+            // Startup audio greeting in Bahasa Indonesia
             if (PriorityAudioManager.Instance != null)
             {
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Success);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "By Your Sight ready. Say Help for commands",
+                    "By Your Sight siap. Ucapkan Bantuan untuk daftar perintah",
                     AudioPriority.P3_ObjectIdentity
                 );
             }
@@ -146,13 +265,14 @@ namespace ByYourSight.InputSystem
 #if UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_EDITOR_WIN
             try
             {
-                _keywordRecognizer = new KeywordRecognizer(BuildVoiceVocabulary(), ConfidenceLevel.Medium);
+                // ConfidenceLevel.Low allows Indonesian pronunciation on the native Windows recognizer
+                _keywordRecognizer = new KeywordRecognizer(BuildVoiceVocabulary(), ConfidenceLevel.Low);
                 _keywordRecognizer.OnPhraseRecognized += args =>
                 {
                     ProcessVoiceCommand(args.text);
                 };
                 _keywordRecognizer.Start();
-                Debug.Log("[Voice] Native HoloLens KeywordRecognizer started (Offline English).");
+                Debug.Log("[Voice] Native HoloLens KeywordRecognizer started (Bilingual Indonesian Phonetic + English).");
             }
             catch (System.Exception e)
             {
@@ -181,7 +301,7 @@ namespace ByYourSight.InputSystem
         }
 
         /// <summary>
-        /// KF04: Main parser for processing English voice commands
+        /// KF04: Main parser for processing Bahasa Indonesia (including phonetic spellings) & English voice commands
         /// (both from HoloLens native offline KeywordRecognizer and Editor simulation buttons).
         /// </summary>
         public void ProcessVoiceCommand(string rawCommand)
@@ -189,18 +309,24 @@ namespace ByYourSight.InputSystem
             if (string.IsNullOrWhiteSpace(rawCommand) || PriorityAudioManager.Instance == null)
                 return;
 
-            string cmd = rawCommand.Trim().ToLowerInvariant();
+            string trimmed = rawCommand.Trim().TrimEnd('?', '.', '!');
+            string cmd = trimmed.ToLowerInvariant();
+            if (_phoneticCommandAliases.TryGetValue(cmd, out string canonical))
+            {
+                cmd = canonical;
+            }
+
             PriorityAudioManager.Instance.PlayEarcon(EarconType.ListeningStart);
 
-            // 1. "Mute" / "Quiet" (KF06)
-            if (cmd == "mute" || cmd == "quiet" || cmd == "silence")
+            // 1. "Diam" / "Mute" (KF06)
+            if (cmd == "diam" || cmd == "mute" || cmd == "quiet" || cmd == "silence")
             {
                 PriorityAudioManager.Instance.SetMute(true);
                 return;
             }
 
-            // 2. "Resume" / "Unmute" (KF06)
-            if (cmd == "resume" || cmd == "unmute" || cmd == "speak")
+            // 2. "Lanjut" / "Resume" (KF06)
+            if (cmd == "lanjut" || cmd == "resume" || cmd == "unmute" || cmd == "speak")
             {
                 PriorityAudioManager.Instance.SetMute(false);
                 return;
@@ -212,52 +338,69 @@ namespace ByYourSight.InputSystem
                 PriorityAudioManager.Instance.isMuted = false;
             }
 
-            // 3. "What is this?" / "Identify" (KF01)
-            if (cmd.Contains("what is this") || cmd.Contains("what's this") || cmd == "identify")
+            // 3. "Ini apa?" / "What is this?" (KF01)
+            if (cmd == "ini apa" || cmd.Contains("ini apa") || cmd.Contains("apa ini") ||
+                cmd.Contains("what is this") || cmd.Contains("what's this") || cmd == "identify")
             {
                 objectRecognizer?.IdentifyObjectInGaze();
                 return;
             }
 
-            // 4. "Save object [label]" (KF02)
-            if (cmd.StartsWith("save"))
+            // "Daftar simpanan" / "List saved"
+            if (cmd == "daftar simpanan" || cmd == "list saved")
             {
-                // "Save door" -> "door", "Save object House Keys" -> "House Keys", "Save object" -> HUD label
-                string label = rawCommand.Trim().Substring(4).Trim();
-                string lowerLabel = label.ToLowerInvariant();
-                if (lowerLabel.StartsWith("object")) label = label.Substring(6).Trim();
-                else if (lowerLabel.StartsWith("item")) label = label.Substring(4).Trim();
-                if (string.IsNullOrEmpty(label)) label = _customSaveLabel;
+                List<string> saved = objectRecognizer != null ? objectRecognizer.GetSavedLabels() : new List<string>();
+                PriorityAudioManager.Instance.EnqueueSpeech(
+                    saved.Count == 0 ? "Belum ada objek tersimpan" : "Tersimpan: " + string.Join(", ", saved),
+                    AudioPriority.P3_ObjectIdentity
+                );
+                return;
+            }
+
+            // "Hapus simpanan" / "Clear saved"
+            if (cmd == "hapus simpanan" || cmd == "clear saved" || cmd == "delete saved")
+            {
+                objectRecognizer?.ClearSavedAnchors();
+                PriorityAudioManager.Instance.EnqueueSpeech(
+                    "Semua objek tersimpan dihapus",
+                    AudioPriority.P3_ObjectIdentity
+                );
+                return;
+            }
+
+            // 4. "Simpan [label]" / "Save object [label]" (KF02)
+            if (cmd == "simpan objek" || cmd.StartsWith("simpan") || cmd.StartsWith("seem pan") || cmd.StartsWith("save"))
+            {
+                string label = "";
+                if (cmd != "simpan objek")
+                {
+                    if (cmd.StartsWith("seem pan")) label = trimmed.Substring(8).Trim();
+                    else if (cmd.StartsWith("simpan")) label = trimmed.Substring(6).Trim();
+                    else if (cmd.StartsWith("save")) label = trimmed.Substring(4).Trim();
+
+                    string lowerLabel = label.ToLowerInvariant();
+                    if (lowerLabel.StartsWith("objek")) label = label.Substring(5).Trim();
+                    else if (lowerLabel.StartsWith("benda")) label = label.Substring(5).Trim();
+                    else if (lowerLabel.StartsWith("object")) label = label.Substring(6).Trim();
+                    else if (lowerLabel.StartsWith("item")) label = label.Substring(4).Trim();
+                }
+
+                if (string.IsNullOrEmpty(label))
+                    label = _customSaveLabel;
+
                 objectRecognizer?.SaveCustomObjectInGaze(label);
                 return;
             }
 
-            // "List saved": reads back every label the user has tagged in the real room
-            if (cmd == "list saved")
+            // 5. "Cari [nama benda]" / "Find [object name]" (KF03)
+            if (cmd.StartsWith("cari ") || cmd.StartsWith("chah ree ") || cmd.StartsWith("cha ree ") || cmd.StartsWith("find "))
             {
-                List<string> saved = objectRecognizer != null ? objectRecognizer.GetSavedLabels() : new List<string>();
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    saved.Count == 0 ? "Nothing saved yet" : "Saved: " + string.Join(", ", saved),
-                    AudioPriority.P3_ObjectIdentity
-                );
-                return;
-            }
+                string targetName;
+                if (cmd.StartsWith("chah ree ")) targetName = trimmed.Substring(9).Trim();
+                else if (cmd.StartsWith("cha ree ")) targetName = trimmed.Substring(8).Trim();
+                else targetName = trimmed.Substring(5).Trim();
 
-            // "Clear saved": deletes all persisted room anchors from memory and disk
-            if (cmd == "clear saved" || cmd == "delete saved")
-            {
-                objectRecognizer?.ClearSavedAnchors();
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    "All saved items cleared",
-                    AudioPriority.P3_ObjectIdentity
-                );
-                return;
-            }
-
-            // 5. "Find [object name]" (KF03)
-            if (cmd.StartsWith("find "))
-            {
-                string targetName = rawCommand.Substring(5).Trim();
+                string indoTarget = RealWorldObjectDetector.ToIndonesianLabel(targetName);
                 TrackableObject found = objectRecognizer != null ? objectRecognizer.FindObjectByName(targetName) : null;
                 if (found != null && navigator != null)
                 {
@@ -267,47 +410,52 @@ namespace ByYourSight.InputSystem
                 {
                     PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                     PriorityAudioManager.Instance.EnqueueSpeech(
-                        $"{targetName} not saved yet. Look at it and say Save {targetName}",
+                        $"{indoTarget} belum disimpan. Arahkan pandangan lalu ucapkan Simpan {indoTarget}",
                         AudioPriority.P3_ObjectIdentity
                     );
                 }
                 return;
             }
 
-            // 6. "Navigate to [destination]" / "Take me to [destination]" (KF05)
-            if (cmd.StartsWith("navigate to ") || cmd.StartsWith("take me to "))
+            // 6. "Antar ke [tujuan]" / "Navigasi ke [tujuan]" / "Navigate to [destination]" (KF05)
+            if (cmd.StartsWith("antar ke ") || cmd.StartsWith("un tar ke ") || cmd.StartsWith("navigasi ke ") ||
+                cmd.StartsWith("navigate to ") || cmd.StartsWith("take me to "))
             {
-                string dest = cmd.StartsWith("navigate to ")
-                    ? rawCommand.Substring(12).Trim()
-                    : rawCommand.Substring(11).Replace("the ", "").Trim();
+                string dest;
+                if (cmd.StartsWith("antar ke ")) dest = trimmed.Substring(9).Trim();
+                else if (cmd.StartsWith("un tar ke ")) dest = trimmed.Substring(10).Trim();
+                else if (cmd.StartsWith("navigasi ke ")) dest = trimmed.Substring(12).Trim();
+                else if (cmd.StartsWith("navigate to ")) dest = trimmed.Substring(12).Trim();
+                else dest = trimmed.Substring(11).Replace("the ", "").Trim();
+
                 navigator?.StartNavigationTo(dest);
                 return;
             }
 
-            // 7. "Repeat" & "Details" (T3 Design Principles)
-            if (cmd == "repeat")
+            // 7. "Ulangi" & "Detail" (T3 Design Principles)
+            if (cmd == "ulangi" || cmd == "repeat")
             {
                 PriorityAudioManager.Instance.RepeatLastSpeech(detailed: false);
                 return;
             }
-            if (cmd == "details" || cmd == "detail")
+            if (cmd == "detail" || cmd == "details")
             {
                 PriorityAudioManager.Instance.RepeatLastSpeech(detailed: true);
                 return;
             }
 
-            // 8. "Cancel" / "Stop"
-            if (cmd == "cancel" || cmd == "stop")
+            // 8. "Batal" / "Berhenti" / "Cancel" / "Stop"
+            if (cmd == "batal" || cmd == "berhenti" || cmd == "cancel" || cmd == "stop")
             {
                 navigator?.StopAllGuidance(announce: true);
                 return;
             }
 
-            // 9. "Help"
-            if (cmd == "help")
+            // 9. "Bantuan" / "Help"
+            if (cmd == "bantuan" || cmd == "help")
             {
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Say: What is this, Find item, Navigate to door, or Mute",
+                    "Ucapkan: Ini apa, Simpan objek, Cari benda, Antar ke pintu, atau Diam",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;
@@ -315,7 +463,7 @@ namespace ByYourSight.InputSystem
 
             PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
             PriorityAudioManager.Instance.EnqueueSpeech(
-                "Command not recognized. Say Help",
+                "Perintah tidak dikenali. Ucapkan Bantuan",
                 AudioPriority.P3_ObjectIdentity
             );
         }
@@ -405,30 +553,30 @@ namespace ByYourSight.InputSystem
             if (PriorityAudioManager.Instance != null)
             {
                 string modeMsg = isRealHoloLensRoomMode
-                    ? "Real room spatial scan active"
-                    : "Simulation room active";
+                    ? "Mode ruangan nyata aktif"
+                    : "Mode simulasi aktif";
                 PriorityAudioManager.Instance.EnqueueSpeech(modeMsg, AudioPriority.P3_ObjectIdentity);
             }
         }
 
         private void HandleKeyboardShortcuts()
         {
-            // Quick keyboard shortcuts for demo & usability testing
-            if (Input.GetKeyDown(KeyCode.Alpha1)) ProcessVoiceCommand("What is this?");
-            if (Input.GetKeyDown(KeyCode.Alpha2)) ProcessVoiceCommand($"Save object {_customSaveLabel}");
-            if (Input.GetKeyDown(KeyCode.Alpha3)) ProcessVoiceCommand("Find Water bottle");
-            if (Input.GetKeyDown(KeyCode.Alpha4)) ProcessVoiceCommand("Find Coffee mug");
-            if (Input.GetKeyDown(KeyCode.Alpha5)) ProcessVoiceCommand("Navigate to Door");
-            if (Input.GetKeyDown(KeyCode.Alpha6)) ProcessVoiceCommand("Navigate to Desk");
-            if (Input.GetKeyDown(KeyCode.Alpha7)) ProcessVoiceCommand("Repeat");
-            if (Input.GetKeyDown(KeyCode.Alpha8)) ProcessVoiceCommand("Details");
-            if (Input.GetKeyDown(KeyCode.Alpha9)) ProcessVoiceCommand("Cancel");
+            // Quick keyboard shortcuts for demo & usability testing (Wizard of Oz backup)
+            if (Input.GetKeyDown(KeyCode.Alpha1)) ProcessVoiceCommand("Ini apa");
+            if (Input.GetKeyDown(KeyCode.Alpha2)) ProcessVoiceCommand($"Simpan {_customSaveLabel}");
+            if (Input.GetKeyDown(KeyCode.Alpha3)) ProcessVoiceCommand("Cari Botol minum");
+            if (Input.GetKeyDown(KeyCode.Alpha4)) ProcessVoiceCommand("Cari Cangkir");
+            if (Input.GetKeyDown(KeyCode.Alpha5)) ProcessVoiceCommand("Antar ke Pintu");
+            if (Input.GetKeyDown(KeyCode.Alpha6)) ProcessVoiceCommand("Antar ke Meja");
+            if (Input.GetKeyDown(KeyCode.Alpha7)) ProcessVoiceCommand("Ulangi");
+            if (Input.GetKeyDown(KeyCode.Alpha8)) ProcessVoiceCommand("Detail");
+            if (Input.GetKeyDown(KeyCode.Alpha9)) ProcessVoiceCommand("Batal");
 
-            // One-handed gesture (KF06): 'M' key toggles Mute / Resume
+            // One-handed gesture (KF06): 'M' key toggles Diam / Lanjut
             if (Input.GetKeyDown(KeyCode.M) && PriorityAudioManager.Instance != null)
             {
                 bool nextMute = !PriorityAudioManager.Instance.isMuted;
-                ProcessVoiceCommand(nextMute ? "Mute" : "Resume");
+                ProcessVoiceCommand(nextMute ? "Diam" : "Lanjut");
             }
 
             // 'R' key toggles between Real HoloLens Room (Spatial Mesh) vs Simulated Room
@@ -478,89 +626,89 @@ namespace ByYourSight.InputSystem
                     GUI.color = new Color(1f, 0.92f, 0.1f, 1f); // High-Contrast Yellow Info/Target
                 }
 
-                string muteTag = PriorityAudioManager.Instance.isMuted ? " [MUTED - P0 Active]" : "";
+                string muteTag = PriorityAudioManager.Instance.isMuted ? " [DIAM - P0 Tetap Aktif]" : "";
                 GUI.Box(
                     new Rect(Screen.width * 0.18f, 16, Screen.width * 0.64f, 54),
-                    $"SPEECH ({PriorityAudioManager.Instance.currentPriority}){muteTag}: \"{activeSpeech}\"",
+                    $"SUARA ({PriorityAudioManager.Instance.currentPriority}){muteTag}: \"{activeSpeech}\"",
                     bannerStyle
                 );
             }
 
             // Voice Command Simulation Control Panel (KF01 - KF08) on Left Screen
             GUI.color = Color.white;
-            GUILayout.BeginArea(new Rect(16, 80, 340, 580), "By Your Sight — HoloLens Native (EN)", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(16, 80, 355, 580), "By Your Sight — Bahasa Indonesia (ID/EN)", GUI.skin.window);
 
             string modeLabel = isRealHoloLensRoomMode
-                ? "[R] Mode: REAL HOLOLENS ROOM (Click for Sim)"
-                : "[R] Mode: SIMULATED ROOM (Click for Real Room)";
+                ? "[R] Mode: RUANGAN NYATA HOLOLENS (Klik untuk Sim)"
+                : "[R] Mode: RUANGAN SIMULASI (Klik untuk Nyata)";
             if (GUILayout.Button(modeLabel))
             {
                 ToggleRealHoloLensRoomMode();
             }
 
-            GUILayout.Label("Walk: WASD | Turn Head: HoloLens or Q/E/Right-Click");
+            GUILayout.Label("Jalan: WASD | Menoleh: HoloLens atau Q/E/Klik-Kanan");
 
             if (_objectDetector == null) _objectDetector = FindObjectOfType<RealWorldObjectDetector>();
             if (_objectDetector != null && _objectDetector.enableDetection)
             {
                 string camStatus = _objectDetector.isServerConnected
-                    ? $"Camera AI: ON | {_objectDetector.trackedObjectCount} objects | sees: {(_objectDetector.lastDetectedLabels == "" ? "-" : _objectDetector.lastDetectedLabels)}"
-                    : "Camera AI: OFF (start detection_server.py)";
+                    ? $"Kamera AI: AKTIF | {_objectDetector.trackedObjectCount} objek | lihat: {(_objectDetector.lastDetectedLabels == "" ? "-" : _objectDetector.lastDetectedLabels)}"
+                    : "Kamera AI: MATI (jalankan detection_server.py)";
                 GUILayout.Label(camStatus);
             }
             GUILayout.Space(6);
 
-            if (GUILayout.Button("[1] KF01: \"What is this?\" (Gaze Detect)"))
-                ProcessVoiceCommand("What is this?");
+            if (GUILayout.Button("[1] KF01: \"Ini apa?\" (Deteksi Pandangan)"))
+                ProcessVoiceCommand("Ini apa");
 
             GUILayout.BeginHorizontal();
             _customSaveLabel = GUILayout.TextField(_customSaveLabel, GUILayout.Width(135));
-            if (GUILayout.Button("[2] KF02: \"Save object\""))
-                ProcessVoiceCommand($"Save object {_customSaveLabel}");
+            if (GUILayout.Button("[2] KF02: \"Simpan objek\""))
+                ProcessVoiceCommand($"Simpan {_customSaveLabel}");
             GUILayout.EndHorizontal();
 
-            if (GUILayout.Button("[3] KF03: \"Find Water bottle\" (Beacon)"))
-                ProcessVoiceCommand("Find Water bottle");
+            if (GUILayout.Button("[3] KF03: \"Cari Botol minum\" (Beacon)"))
+                ProcessVoiceCommand("Cari Botol minum");
 
-            if (GUILayout.Button("[4] KF03: \"Find Coffee mug\" (Beacon)"))
-                ProcessVoiceCommand("Find Coffee mug");
+            if (GUILayout.Button("[4] KF03: \"Cari Cangkir\" (Beacon)"))
+                ProcessVoiceCommand("Cari Cangkir");
 
-            if (GUILayout.Button("[5] KF05: \"Navigate to Door\" (Route P1)"))
-                ProcessVoiceCommand("Navigate to Door");
+            if (GUILayout.Button("[5] KF05: \"Antar ke Pintu\" (Rute P1)"))
+                ProcessVoiceCommand("Antar ke Pintu");
 
-            if (GUILayout.Button("[6] KF05: \"Navigate to Desk\" (Route P1)"))
-                ProcessVoiceCommand("Navigate to Desk");
+            if (GUILayout.Button("[6] KF05: \"Antar ke Meja\" (Rute P1)"))
+                ProcessVoiceCommand("Antar ke Meja");
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("[7] \"Repeat\""))
-                ProcessVoiceCommand("Repeat");
-            if (GUILayout.Button("[8] \"Details\""))
-                ProcessVoiceCommand("Details");
-            if (GUILayout.Button("[9] \"Cancel\""))
-                ProcessVoiceCommand("Cancel");
+            if (GUILayout.Button("[7] \"Ulangi\""))
+                ProcessVoiceCommand("Ulangi");
+            if (GUILayout.Button("[8] \"Detail\""))
+                ProcessVoiceCommand("Detail");
+            if (GUILayout.Button("[9] \"Batal\""))
+                ProcessVoiceCommand("Batal");
             GUILayout.EndHorizontal();
 
-            if (GUILayout.Button("[M] KF06 Gesture/Voice: \"Mute\" / \"Resume\""))
+            if (GUILayout.Button("[M] KF06 Gestur/Suara: \"Diam\" / \"Lanjut\""))
             {
                 bool nextMute = PriorityAudioManager.Instance != null && !PriorityAudioManager.Instance.isMuted;
-                ProcessVoiceCommand(nextMute ? "Mute" : "Resume");
+                ProcessVoiceCommand(nextMute ? "Diam" : "Lanjut");
             }
 
             GUILayout.Space(6);
-            GUILayout.Label($"KF06 Ambient Noise (Volume: {(PriorityAudioManager.Instance != null ? PriorityAudioManager.Instance.adaptiveVolumeMultiplier : 1f):0.00}x):");
+            GUILayout.Label($"KF06 Kebisingan Sekitar (Volume: {(PriorityAudioManager.Instance != null ? PriorityAudioManager.Instance.adaptiveVolumeMultiplier : 1f):0.00}x):");
             simulatedAmbientNoiseLevel = GUILayout.HorizontalSlider(simulatedAmbientNoiseLevel, 0f, 1f);
 
             GUILayout.Space(6);
-            if (GUILayout.Button("KF08: Simulate Approaching Person (P2)"))
+            if (GUILayout.Button("KF08: Simulasikan Orang Mendekat (P2)"))
             {
                 TriggerPersonApproachingDemo();
             }
 
             GUILayout.Space(6);
-            GUILayout.Label("Custom Voice Command (KF04):");
+            GUILayout.Label("Perintah Suara Kustom (KF04):");
             GUILayout.BeginHorizontal();
             _customCommandInput = GUILayout.TextField(_customCommandInput);
-            if (GUILayout.Button("Speak", GUILayout.Width(75)))
+            if (GUILayout.Button("Ucapkan", GUILayout.Width(75)))
             {
                 ProcessVoiceCommand(_customCommandInput);
             }

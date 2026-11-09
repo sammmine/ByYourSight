@@ -58,8 +58,8 @@ namespace ByYourSight.Perception
         }
 
         /// <summary>
-        /// KF01: Triggered when the user says "What is this?"
-        /// T3 output pattern: [What] + [Distance] + [Direction], e.g., "Water bottle, 1.5 meters, ahead"
+        /// KF01: Triggered when the user says "Ini apa?" / "What is this?"
+        /// T3 output pattern: [Apa] + [Jarak] + [Arah], e.g., "Botol minum, 1 setengah meter, di depan"
         /// </summary>
         public void IdentifyObjectInGaze()
         {
@@ -70,7 +70,7 @@ namespace ByYourSight.Perception
             {
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Not sure, low light. Move closer to the object",
+                    "Kurang jelas, cahaya redup. Dekatkan ke objek",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;
@@ -81,17 +81,16 @@ namespace ByYourSight.Perception
 
             if (TryFindBestTargetInGaze(gazeRay, head, out RaycastHit hit, out TrackableObject trackable, out Vector3 targetPoint, out float rawDistance))
             {
-                string objName = trackable != null ? trackable.labelName : SurfaceClassifier.Describe(hit, head);
-                float dist = Mathf.Max(0.5f, Mathf.Round(rawDistance * 2f) / 2f); // Round to nearest 0.5m
-                string distText = Mathf.Approximately(dist, 1f)
-                    ? "1 meter"
-                    : (dist % 1f == 0f ? $"{(int)dist} meters" : $"{dist:0.0} meters");
+                string objName = trackable != null
+                    ? RealWorldObjectDetector.ToIndonesianLabel(trackable.labelName)
+                    : SurfaceClassifier.Describe(hit, head);
+                string distText = PriorityAudioManager.FormatDistance(rawDistance);
                 string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, targetPoint);
 
                 string shortMsg = $"{objName}, {distText}, {dirText}";
                 string detailMsg = trackable != null && !string.IsNullOrEmpty(trackable.detailedDescription)
                     ? $"{objName}, {distText} {dirText}. {trackable.detailedDescription}"
-                    : $"{objName} detected at {distText} {dirText}";
+                    : $"{objName} terdeteksi pada jarak {distText} {dirText}";
 
                 if (trackable != null)
                 {
@@ -114,7 +113,7 @@ namespace ByYourSight.Perception
             {
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "No object detected ahead",
+                    "Tidak ada objek di depan",
                     AudioPriority.P3_ObjectIdentity
                 );
             }
@@ -232,7 +231,7 @@ namespace ByYourSight.Perception
         /// <summary>
         /// KF02: Captures/saves the real-world object in front of the user with a custom voice label
         /// and anchors a 3D wireframe bounding box at its real-world 3D position.
-        /// Triggered when the user says "Save object [label]".
+        /// Triggered when the user says "Simpan [label]" / "Save object [label]".
         /// </summary>
         public void SaveCustomObjectInGaze(string customLabel)
         {
@@ -241,7 +240,9 @@ namespace ByYourSight.Perception
 
             Transform head = Camera.main.transform;
             Ray gazeRay = new Ray(head.position, head.forward);
-            string finalLabel = string.IsNullOrWhiteSpace(customLabel) ? "Saved Item" : customLabel.Trim();
+            string finalLabel = string.IsNullOrWhiteSpace(customLabel)
+                ? "Benda tersimpan"
+                : RealWorldObjectDetector.ToIndonesianLabel(customLabel.Trim());
 
             if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
             {
@@ -250,13 +251,13 @@ namespace ByYourSight.Perception
                 if (trackable != null && !IsRealWorldAnchor(trackable) && !RealWorldObjectDetector.IsDetectionMarker(trackable))
                 {
                     trackable.labelName = finalLabel;
-                    trackable.detailedDescription = $"Personal item saved by user with label {finalLabel}";
+                    trackable.detailedDescription = $"Benda pribadi disimpan dengan nama {finalLabel}";
                     trackable.isCustomUserSaved = true;
                     trackable.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 4.0f);
 
                     PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
                     PriorityAudioManager.Instance.EnqueueSpeech(
-                        $"Saved, {trackable.labelName}",
+                        $"Tersimpan, {trackable.labelName}",
                         AudioPriority.P3_ObjectIdentity,
                         hit.point
                     );
@@ -269,7 +270,7 @@ namespace ByYourSight.Perception
 
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Saved, {anchored.labelName}",
+                    $"Tersimpan, {anchored.labelName}",
                     AudioPriority.P3_ObjectIdentity,
                     hit.point
                 );
@@ -283,7 +284,7 @@ namespace ByYourSight.Perception
 
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, realWorldAnchorPos);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Saved, {anchored.labelName}, 1 meter ahead",
+                    $"Tersimpan, {anchored.labelName}, 1 meter di depan",
                     AudioPriority.P3_ObjectIdentity,
                     realWorldAnchorPos
                 );
@@ -400,18 +401,20 @@ namespace ByYourSight.Perception
 
         private TrackableObject CreateRealWorldSpatialAnchor(Vector3 worldPos, string label, bool persist = true)
         {
+            string normalizedLabel = RealWorldObjectDetector.ToIndonesianLabel(label);
+
             // Saving the same label again moves the tag instead of creating a duplicate
             foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
             {
                 if (IsRealWorldAnchor(existing) &&
-                    string.Equals(existing.labelName, label, System.StringComparison.OrdinalIgnoreCase))
+                    string.Equals(RealWorldObjectDetector.ToIndonesianLabel(existing.labelName), normalizedLabel, System.StringComparison.OrdinalIgnoreCase))
                 {
                     Destroy(existing.gameObject);
                 }
             }
 
             GameObject anchorObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            anchorObj.name = RealWorldAnchorPrefix + label;
+            anchorObj.name = RealWorldAnchorPrefix + normalizedLabel;
             anchorObj.transform.position = worldPos;
             anchorObj.transform.localScale = new Vector3(0.22f, 0.22f, 0.22f);
 
@@ -429,8 +432,8 @@ namespace ByYourSight.Perception
             }
 
             TrackableObject trackable = anchorObj.AddComponent<TrackableObject>();
-            trackable.labelName = label;
-            trackable.detailedDescription = $"Real-world anchored object ({label})";
+            trackable.labelName = normalizedLabel;
+            trackable.detailedDescription = $"Objek ruangan tersimpan ({normalizedLabel})";
             trackable.category = SemanticObjectCategory.EverydayObject;
             trackable.isCustomUserSaved = true;
 
@@ -468,14 +471,15 @@ namespace ByYourSight.Perception
         }
 
         /// <summary>
-        /// Finds an object by name (to pass to KF03 Spatial Beacon).
+        /// Finds an object by name (supports both Bahasa Indonesia and English / phonetic queries).
         /// </summary>
         public TrackableObject FindObjectByName(string queryName)
         {
             if (string.IsNullOrWhiteSpace(queryName))
                 return null;
 
-            string q = queryName.Trim().ToLowerInvariant();
+            string qRaw = queryName.Trim().ToLowerInvariant();
+            string qIndo = RealWorldObjectDetector.ToIndonesianLabel(qRaw).ToLowerInvariant();
             TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
 
             TrackableObject bestMatch = null;
@@ -484,7 +488,16 @@ namespace ByYourSight.Perception
 
             foreach (var obj in allObjects)
             {
-                if (obj.labelName.ToLowerInvariant().Contains(q))
+                if (obj == null || string.IsNullOrEmpty(obj.labelName))
+                    continue;
+
+                string objRaw = obj.labelName.ToLowerInvariant();
+                string objIndo = RealWorldObjectDetector.ToIndonesianLabel(obj.labelName).ToLowerInvariant();
+
+                bool match = objRaw.Contains(qRaw) || qRaw.Contains(objRaw) ||
+                             objIndo.Contains(qIndo) || qIndo.Contains(objIndo);
+
+                if (match)
                 {
                     float d = Vector3.Distance(userPos, obj.transform.position);
                     if (d < closestDist)
@@ -535,7 +548,7 @@ namespace ByYourSight.Perception
                             obj.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 2.5f);
 
                             PriorityAudioManager.Instance.EnqueueSpeech(
-                                $"Person approaching, {dir}",
+                                $"Orang mendekat, {dir}",
                                 AudioPriority.P2_SocialInfo,
                                 obj.transform.position
                             );

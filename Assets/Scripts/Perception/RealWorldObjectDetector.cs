@@ -91,33 +91,129 @@ namespace ByYourSight.Perception
             public Quaternion rotation;
         }
 
-        // YOLO (COCO) class name -> spoken English label used by voice commands
-        private static readonly Dictionary<string, string> LabelMap = new Dictionary<string, string>
+        // YOLO (COCO) & bilingual voice terms -> spoken Bahasa Indonesia label
+        private static readonly Dictionary<string, string> LabelMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            { "cup", "coffee mug" },
-            { "bottle", "water bottle" },
-            { "cell phone", "phone" },
-            { "dining table", "table" },
+            { "person", "orang" },
+            { "orang", "orang" },
+            { "cup", "cangkir" },
+            { "coffee mug", "cangkir" },
+            { "mug", "cangkir" },
+            { "gelas", "cangkir" },
+            { "cangkir", "cangkir" },
+            { "chung keer", "cangkir" },
+            { "guh las", "cangkir" },
+            { "bottle", "botol minum" },
+            { "water bottle", "botol minum" },
+            { "botol", "botol minum" },
+            { "botol air", "botol minum" },
+            { "botol minum", "botol minum" },
+            { "bo tol", "botol minum" },
+            { "cell phone", "handphone" },
+            { "phone", "handphone" },
+            { "handphone", "handphone" },
+            { "hp", "handphone" },
+            { "hape", "handphone" },
+            { "hah peh", "handphone" },
+            { "ponsel", "handphone" },
+            { "dining table", "meja" },
+            { "table", "meja" },
+            { "desk", "meja" },
+            { "work desk", "meja kerja" },
+            { "meja", "meja" },
+            { "meja kerja", "meja kerja" },
+            { "may jah", "meja" },
+            { "meh ja", "meja" },
+            { "chair", "kursi" },
+            { "kursi", "kursi" },
+            { "koor see", "kursi" },
             { "couch", "sofa" },
-            { "backpack", "bag" },
-            { "handbag", "bag" },
-            { "suitcase", "bag" },
-            { "tv", "television" },
-            { "potted plant", "plant" },
-            { "keys", "house keys" },
-            { "box", "small box" },
-            { "trash can", "trash bin" },
-            { "refrigerator", "shelf" },
-            { "fridge", "shelf" },
-            { "rack", "shelf" }
+            { "sofa", "sofa" },
+            { "bed", "tempat tidur" },
+            { "kasur", "tempat tidur" },
+            { "tempat tidur", "tempat tidur" },
+            { "kah soor", "tempat tidur" },
+            { "backpack", "tas" },
+            { "handbag", "tas" },
+            { "suitcase", "tas" },
+            { "bag", "tas" },
+            { "tas", "tas" },
+            { "tuss", "tas" },
+            { "tv", "televisi" },
+            { "television", "televisi" },
+            { "televisi", "televisi" },
+            { "potted plant", "tanaman" },
+            { "plant", "tanaman" },
+            { "tanaman", "tanaman" },
+            { "keys", "kunci" },
+            { "house keys", "kunci" },
+            { "kunci", "kunci" },
+            { "koon chee", "kunci" },
+            { "box", "kotak" },
+            { "small box", "kotak" },
+            { "kotak", "kotak" },
+            { "ko tak", "kotak" },
+            { "trash can", "tempat sampah" },
+            { "trash bin", "tempat sampah" },
+            { "sampah", "tempat sampah" },
+            { "tempat sampah", "tempat sampah" },
+            { "sum pah", "tempat sampah" },
+            { "refrigerator", "rak" },
+            { "fridge", "rak" },
+            { "shelf", "rak" },
+            { "rack", "rak" },
+            { "rak", "rak" },
+            { "rak buku", "rak" },
+            { "ruck", "rak" },
+            { "cabinet", "lemari" },
+            { "lemari", "lemari" },
+            { "luh mah ree", "lemari" },
+            { "door", "pintu" },
+            { "exit", "pintu" },
+            { "exit door", "pintu" },
+            { "pintu", "pintu" },
+            { "pintu keluar", "pintu" },
+            { "peen too", "pintu" },
+            { "pin too", "pintu" },
+            { "window", "jendela" },
+            { "jendela", "jendela" },
+            { "stairs", "tangga" },
+            { "tangga", "tangga" },
+            { "tung gah", "tangga" },
+            { "pillar", "tiang" },
+            { "tiang", "tiang" },
+            { "book", "buku" },
+            { "buku", "buku" },
+            { "boo koo", "buku" },
+            { "laptop", "laptop" },
+            { "toilet", "toilet" },
+            { "sink", "wastafel" },
+            { "wastafel", "wastafel" },
+            { "fire hydrant", "hidran" },
+            { "hidran", "hidran" },
+            { "hee drun", "hidran" },
+            { "bench", "bangku" },
+            { "keyboard", "keyboard" },
+            { "mouse", "mouse" },
+            { "remote", "remot" },
+            { "scissors", "gunting" },
+            { "clock", "jam dinding" },
+            { "vase", "vas" },
+            { "umbrella", "payung" },
+            { "bowl", "mangkok" },
+            { "spoon", "sendok" },
+            { "fork", "garpu" },
+            { "knife", "pisau" }
         };
 
         // Objects that are dangerous to walk into (KF07). Everything else is an everyday object (KF01).
-        private static readonly HashSet<string> HazardLabels = new HashSet<string>
+        private static readonly HashSet<string> HazardLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "chair", "table", "desk", "sofa", "bed", "bench", "toilet", "plant", "bicycle", "motorcycle",
             "refrigerator", "shelf", "rack", "cabinet", "stairs", "door", "pillar", "trash bin", "bag", "fire hydrant", "stop sign",
-            "car", "parking meter"
+            "car", "parking meter",
+            "kursi", "meja", "meja kerja", "tempat tidur", "bangku", "tanaman", "rak", "lemari",
+            "tangga", "pintu", "tiang", "tempat sampah", "tas", "hidran"
         };
 
         private readonly List<HeadPose> _poseHistory = new List<HeadPose>();
@@ -240,7 +336,7 @@ namespace ByYourSight.Perception
                     continue;
 
                 string label = MapLabel(d.label);
-                bool isPerson = label == "person";
+                bool isPerson = label == "orang" || label == "person";
 
                 // Pixel -> ray: aim at the lower-middle of the box for floor-standing things, the center otherwise
                 float aimY = isPerson ? d.cy : d.cy + d.h * 0.15f;
@@ -308,7 +404,7 @@ namespace ByYourSight.Perception
 
                 t.lastSeen = Time.time;
                 t.misses = 0;
-                t.marker.detailedDescription = $"{Capitalize(label)} detected by camera, {Mathf.RoundToInt(d.conf * 100f)} percent sure";
+                t.marker.detailedDescription = $"{Capitalize(label)} terdeteksi kamera, keyakinan {Mathf.RoundToInt(d.conf * 100f)} persen";
                 matched.Add(t);
                 if (!labels.Contains(label)) labels.Add(label);
             }
@@ -376,7 +472,7 @@ namespace ByYourSight.Perception
             trackable.category = isPerson
                 ? SemanticObjectCategory.Person
                 : (HazardLabels.Contains(label) ? SemanticObjectCategory.HazardObstacle : SemanticObjectCategory.EverydayObject);
-            trackable.detailedDescription = $"{Capitalize(label)} detected by camera";
+            trackable.detailedDescription = $"{Capitalize(label)} terdeteksi kamera";
 
             return new TrackedDetection { marker = trackable, label = label, isPerson = isPerson, lastSeen = Time.time };
         }
@@ -443,6 +539,16 @@ namespace ByYourSight.Perception
             toUser.y = 0f;
             if (toUser.sqrMagnitude > 0.001f)
                 t.rotation = Quaternion.LookRotation(-toUser.normalized, Vector3.up);
+        }
+
+        /// <summary>
+        /// Normalizes any English, phonetic, or Indonesian object name into its canonical Bahasa Indonesia spoken label.
+        /// </summary>
+        public static string ToIndonesianLabel(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return raw;
+            return Capitalize(MapLabel(raw));
         }
 
         private static string MapLabel(string raw)

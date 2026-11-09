@@ -242,12 +242,12 @@ namespace ByYourSight.Audio
             else
             {
                 PlayEarcon(EarconType.Success);
-                EnqueueSpeech("Audio resumed", AudioPriority.P3_ObjectIdentity);
+                EnqueueSpeech("Suara aktif kembali", AudioPriority.P3_ObjectIdentity);
             }
         }
 
         /// <summary>
-        /// Voice command "Repeat" / "Details" (T3 Design Principles)
+        /// Voice command "Ulangi" / "Detail" (T3 Design Principles)
         /// </summary>
         public void RepeatLastSpeech(bool detailed = false)
         {
@@ -257,7 +257,7 @@ namespace ByYourSight.Audio
 
             if (string.IsNullOrEmpty(textToRepeat))
             {
-                EnqueueSpeech("No previous message", AudioPriority.P3_ObjectIdentity);
+                EnqueueSpeech("Belum ada pesan sebelumnya", AudioPriority.P3_ObjectIdentity);
                 return;
             }
 
@@ -368,14 +368,24 @@ namespace ByYourSight.Audio
 #if WINDOWS_UWP
         /// <summary>
         /// Native offline Windows Holographic OS (HoloLens 2) TTS using SpeechSynthesizer.
-        /// Zero cloud dependency, runs natively on device.
+        /// Prefers Indonesian (id-ID) voice if installed, otherwise uses system default.
         /// </summary>
         private async void SpeakWithHoloLensNativeUWP(string text)
         {
             try
             {
                 if (_uwpSynthesizer == null)
+                {
                     _uwpSynthesizer = new SpeechSynthesizer();
+                    foreach (var v in SpeechSynthesizer.AllVoices)
+                    {
+                        if (v.Language != null && v.Language.StartsWith("id", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _uwpSynthesizer.Voice = v;
+                            break;
+                        }
+                    }
+                }
 
                 SpeechSynthesisStream stream = await _uwpSynthesizer.SynthesizeTextToStreamAsync(text);
                 byte[] bytes = new byte[stream.Size];
@@ -444,7 +454,8 @@ namespace ByYourSight.Audio
 
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
         /// <summary>
-        /// Synthesizes English speech on Windows using System.Speech into a WAV AudioClip
+        /// Synthesizes Indonesian speech on Windows using System.Speech into a WAV AudioClip
+        /// (automatically selecting an installed id-ID / Andika / Gadis voice if available)
         /// and plays it directly through Unity's 3D AudioSource so Holographic Remoting streams
         /// the spatial voice directly to the HoloLens 2 speakers!
         /// </summary>
@@ -459,7 +470,16 @@ namespace ByYourSight.Audio
                     File.Delete(tempWav);
                 }
 
-                string psScript = $"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = 1; $s.SetOutputToWaveFile('{tempWav}'); $s.Speak('{clean}'); $s.Dispose()";
+                string psScript =
+                    "Add-Type -AssemblyName System.Speech; " +
+                    "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
+                    "$v = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and ($_.VoiceInfo.Culture.Name -like 'id*' -or $_.VoiceInfo.Name -like '*Andika*' -or $_.VoiceInfo.Name -like '*Gadis*') } | Select-Object -First 1; " +
+                    "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; " +
+                    "$s.Rate = 0; " +
+                    $"$s.SetOutputToWaveFile('{tempWav}'); " +
+                    $"$s.Speak('{clean}'); " +
+                    "$s.Dispose()";
+
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
@@ -505,7 +525,7 @@ namespace ByYourSight.Audio
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = "/usr/bin/say",
-                    Arguments = $"-v Samantha -r 190 \"{clean}\"",
+                    Arguments = $"-v Damayanti -r 185 \"{clean}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
@@ -527,8 +547,25 @@ namespace ByYourSight.Audio
         }
 
         /// <summary>
-        /// Converts target position into body-relative direction terms (T3):
-        /// "ahead", "slightly right", "right", "slightly left", "left", "behind".
+        /// Formats distance in meters into natural Bahasa Indonesia speech
+        /// ("setengah meter", "1 meter", "1 setengah meter", "2 meter", etc.).
+        /// </summary>
+        public static string FormatDistance(float rawMeters)
+        {
+            float dist = Mathf.Max(0.5f, Mathf.Round(rawMeters * 2f) / 2f); // Round to nearest 0.5m
+            int whole = Mathf.FloorToInt(dist);
+            bool hasHalf = Mathf.Abs(dist - whole - 0.5f) < 0.1f;
+
+            if (whole == 0 && hasHalf)
+                return "setengah meter";
+            if (hasHalf)
+                return $"{whole} setengah meter";
+            return $"{whole} meter";
+        }
+
+        /// <summary>
+        /// Converts target position into body-relative direction terms in Bahasa Indonesia (T3):
+        /// "di depan", "agak kanan", "di kanan", "agak kiri", "di kiri", "di belakang".
         /// </summary>
         public static string GetRelativeBodyDirection(Transform userHead, Vector3 targetPos)
         {
@@ -538,22 +575,22 @@ namespace ByYourSight.Audio
             forward.y = 0f;
 
             if (toTarget.sqrMagnitude < 0.001f)
-                return "ahead";
+                return "di depan";
 
             float signedAngle = Vector3.SignedAngle(forward.normalized, toTarget.normalized, Vector3.up);
 
             if (Mathf.Abs(signedAngle) <= 20f)
-                return "ahead";
+                return "di depan";
             if (signedAngle > 20f && signedAngle <= 60f)
-                return "slightly right";
+                return "agak kanan";
             if (signedAngle > 60f && signedAngle <= 125f)
-                return "right";
+                return "di kanan";
             if (signedAngle < -20f && signedAngle >= -60f)
-                return "slightly left";
+                return "agak kiri";
             if (signedAngle < -60f && signedAngle >= -125f)
-                return "left";
+                return "di kiri";
 
-            return "behind";
+            return "di belakang";
         }
     }
 }

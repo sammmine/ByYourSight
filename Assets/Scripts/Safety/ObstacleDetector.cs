@@ -143,7 +143,7 @@ namespace ByYourSight.Safety
             string label;
             if (trackable != null)
             {
-                label = trackable.labelName;
+                label = RealWorldObjectDetector.ToIndonesianLabel(trackable.labelName);
             }
             else
             {
@@ -220,13 +220,12 @@ namespace ByYourSight.Safety
             string message;
             if (critical)
             {
-                message = $"Warning! {label}, {dir}";
+                message = $"Awas! {label}, {dir}";
             }
             else
             {
                 int roundedMeters = Mathf.Max(1, Mathf.RoundToInt(distance));
-                string meterUnit = roundedMeters == 1 ? "meter" : "meters";
-                message = $"{label}, {roundedMeters} {meterUnit}, {dir}";
+                message = $"{label}, {roundedMeters} meter, {dir}";
             }
 
             bool spoken = PriorityAudioManager.Instance.EnqueueSpeech(

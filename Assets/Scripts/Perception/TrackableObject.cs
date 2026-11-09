@@ -15,11 +15,11 @@ namespace ByYourSight.Perception
     /// </summary>
     public class TrackableObject : MonoBehaviour
     {
-        [Header("Object Identity (English - Native HoloLens)")]
-        public string labelName = "Water bottle";
-        public string detailedDescription = "Blue water bottle on the table";
+        [Header("Identitas Objek (Bahasa Indonesia)")]
+        public string labelName = "Botol minum";
+        public string detailedDescription = "Botol air minum biru di atas meja";
         public SemanticObjectCategory category = SemanticObjectCategory.EverydayObject;
-        public bool isCustomUserSaved = false; // KF02: Saved by the user
+        public bool isCustomUserSaved = false; // KF02: Disimpan oleh pengguna
 
         [Header("Movement Simulation (For KF08 Approaching Person)")]
         public bool simulateApproachingUser = false;
