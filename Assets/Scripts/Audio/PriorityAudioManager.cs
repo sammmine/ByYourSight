@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Networking;
 #if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX || UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
 using System.Diagnostics;
 #endif
@@ -67,8 +69,10 @@ namespace ByYourSight.Audio
         public AudioPriority currentPriority = AudioPriority.P3_ObjectIdentity;
 
         private readonly List<SpeechRequest> _queue = new List<SpeechRequest>();
+        private readonly Dictionary<string, AudioClip> _ttsClipCache = new Dictionary<string, AudioClip>(StringComparer.OrdinalIgnoreCase);
         private AudioSource _earconSource;
         private AudioSource _spatialVoiceSource;
+        private Coroutine _activeSpeechCoroutine;
         private float _speechBusyUntil = 0f;
         private float _lastDangerAlertTime = -10f;
         private bool _lastDangerHadEarcon = false;
@@ -101,6 +105,7 @@ namespace ByYourSight.Audio
 
 #if WINDOWS_UWP
             _uwpSynthesizer = new SpeechSynthesizer();
+            SelectIndonesianOrFemaleUwpVoice();
 #endif
         }
 
@@ -217,13 +222,11 @@ namespace ByYourSight.Audio
 
             UnityEngine.Debug.Log($"[Audio {req.Priority}] \"{req.Text}\"");
 
-#if WINDOWS_UWP
-            SpeakWithHoloLensNativeUWP(req.Text);
-#elif UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
-            SpeakWithWindowsHolographicRemoting(req.Text);
-#elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
-            SpeakWithMacOSEnglish(req.Text);
-#endif
+            if (_activeSpeechCoroutine != null)
+            {
+                StopCoroutine(_activeSpeechCoroutine);
+            }
+            _activeSpeechCoroutine = StartCoroutine(SpeakIndonesianCoroutine(req.Text));
         }
 
         /// <summary>
@@ -268,6 +271,11 @@ namespace ByYourSight.Audio
         {
             _speechBusyUntil = 0f;
             currentSpokenText = "";
+            if (_activeSpeechCoroutine != null)
+            {
+                StopCoroutine(_activeSpeechCoroutine);
+                _activeSpeechCoroutine = null;
+            }
             if (_spatialVoiceSource != null && _spatialVoiceSource.isPlaying)
             {
                 _spatialVoiceSource.Stop();
@@ -365,10 +373,94 @@ namespace ByYourSight.Audio
             return clip;
         }
 
-#if WINDOWS_UWP
         /// <summary>
-        /// Native offline Windows Holographic OS (HoloLens 2) TTS using SpeechSynthesizer.
-        /// Prefers Indonesian (id-ID) voice if installed, otherwise uses system default.
+        /// Primary cross-platform Indonesian (id-ID) female TTS synthesizer.
+        /// Streams natural Indonesian female speech directly into Unity's 3D AudioSource
+        /// (works identically on Windows Holographic Remoting, HoloLens 2 UWP, and macOS without
+        /// requiring Windows Language Pack installation, and caches AudioClips in memory for 0ms replay).
+        /// Falls back to offline OS TTS if no internet connection is available.
+        /// </summary>
+        private IEnumerator SpeakIndonesianCoroutine(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                yield break;
+
+            string key = text.Trim();
+
+            // 1. Instant replay from in-memory cache if this phrase was spoken before
+            if (_ttsClipCache.TryGetValue(key, out AudioClip cachedClip) && cachedClip != null)
+            {
+                if (_spatialVoiceSource != null)
+                {
+                    _speechBusyUntil = Mathf.Max(_speechBusyUntil, Time.time + cachedClip.length + 0.15f);
+                    _spatialVoiceSource.PlayOneShot(cachedClip, adaptiveVolumeMultiplier);
+                }
+                yield break;
+            }
+
+            // 2. Fetch natural female Bahasa Indonesia (id-ID) MP3 clip directly into Unity AudioClip
+            string escaped = UnityWebRequest.EscapeURL(key);
+            string ttsUrl = $"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=id&q={escaped}";
+
+            using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(ttsUrl, AudioType.MPEG))
+            {
+                www.SetRequestHeader("User-Agent", "Mozilla/5.0");
+                www.timeout = 3;
+                yield return www.SendWebRequest();
+
+                if (www.result == UnityWebRequest.Result.Success)
+                {
+                    AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
+                    if (clip != null && clip.length > 0.05f)
+                    {
+                        clip.name = "TTS_ID_" + key;
+                        _ttsClipCache[key] = clip;
+                        if (_spatialVoiceSource != null)
+                        {
+                            _speechBusyUntil = Mathf.Max(_speechBusyUntil, Time.time + clip.length + 0.15f);
+                            _spatialVoiceSource.PlayOneShot(clip, adaptiveVolumeMultiplier);
+                        }
+                        yield break;
+                    }
+                }
+            }
+
+            // 3. Offline fallback if internet is unreachable
+#if WINDOWS_UWP
+            SpeakWithHoloLensNativeUWP(key);
+#elif UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            SpeakWithWindowsOfflineFallback(key);
+#elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
+            SpeakWithMacOSDamayanti(key);
+#endif
+        }
+
+#if WINDOWS_UWP
+        private void SelectIndonesianOrFemaleUwpVoice()
+        {
+            if (_uwpSynthesizer == null) return;
+            VoiceInformation idVoice = null;
+            VoiceInformation femaleVoice = null;
+            foreach (var v in SpeechSynthesizer.AllVoices)
+            {
+                if (v.Language != null && v.Language.StartsWith("id", StringComparison.OrdinalIgnoreCase))
+                {
+                    idVoice = v;
+                    break;
+                }
+                if (femaleVoice == null && v.Gender == VoiceGender.Female)
+                {
+                    femaleVoice = v;
+                }
+            }
+            if (idVoice != null)
+                _uwpSynthesizer.Voice = idVoice;
+            else if (femaleVoice != null)
+                _uwpSynthesizer.Voice = femaleVoice;
+        }
+
+        /// <summary>
+        /// Offline fallback on Windows Holographic OS (HoloLens 2) using SpeechSynthesizer.
         /// </summary>
         private async void SpeakWithHoloLensNativeUWP(string text)
         {
@@ -377,14 +469,7 @@ namespace ByYourSight.Audio
                 if (_uwpSynthesizer == null)
                 {
                     _uwpSynthesizer = new SpeechSynthesizer();
-                    foreach (var v in SpeechSynthesizer.AllVoices)
-                    {
-                        if (v.Language != null && v.Language.StartsWith("id", StringComparison.OrdinalIgnoreCase))
-                        {
-                            _uwpSynthesizer.Voice = v;
-                            break;
-                        }
-                    }
+                    SelectIndonesianOrFemaleUwpVoice();
                 }
 
                 SpeechSynthesisStream stream = await _uwpSynthesizer.SynthesizeTextToStreamAsync(text);
@@ -454,12 +539,10 @@ namespace ByYourSight.Audio
 
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
         /// <summary>
-        /// Synthesizes Indonesian speech on Windows using System.Speech into a WAV AudioClip
-        /// (automatically selecting an installed id-ID / Andika / Gadis voice if available)
-        /// and plays it directly through Unity's 3D AudioSource so Holographic Remoting streams
-        /// the spatial voice directly to the HoloLens 2 speakers!
+        /// Offline fallback on Windows when no internet connection is available.
+        /// Selects Indonesian voice if installed, otherwise forces Female voice instead of male David.
         /// </summary>
-        private void SpeakWithWindowsHolographicRemoting(string text)
+        private void SpeakWithWindowsOfflineFallback(string text)
         {
             try
             {
@@ -474,7 +557,7 @@ namespace ByYourSight.Audio
                     "Add-Type -AssemblyName System.Speech; " +
                     "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
                     "$v = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and ($_.VoiceInfo.Culture.Name -like 'id*' -or $_.VoiceInfo.Name -like '*Andika*' -or $_.VoiceInfo.Name -like '*Gadis*') } | Select-Object -First 1; " +
-                    "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; " +
+                    "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) } else { $s.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Female) }; " +
                     "$s.Rate = 0; " +
                     $"$s.SetOutputToWaveFile('{tempWav}'); " +
                     $"$s.Speak('{clean}'); " +
@@ -506,13 +589,13 @@ namespace ByYourSight.Audio
             }
             catch (Exception e)
             {
-                UnityEngine.Debug.LogWarning("Windows TTS failed: " + e.Message);
+                UnityEngine.Debug.LogWarning("Windows offline TTS fallback failed: " + e.Message);
             }
         }
 #endif
 
 #if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
-        private void SpeakWithMacOSEnglish(string text)
+        private void SpeakWithMacOSDamayanti(string text)
         {
             try
             {

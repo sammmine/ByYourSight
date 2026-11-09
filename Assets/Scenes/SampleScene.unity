@@ -169,8 +169,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Chair
-  detailedDescription: Wooden chair blocking the walkway
+  labelName: Kursi
+  detailedDescription: Kursi kayu menghalangi jalur jalan
   category: 1
   isCustomUserSaved: 0
   simulateApproachingUser: 0
@@ -865,8 +865,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Work desk
-  detailedDescription: Work desk in the front-right corner
+  labelName: Meja kerja
+  detailedDescription: Meja kerja di sudut kanan depan
   category: 0
   isCustomUserSaved: 0
   simulateApproachingUser: 0
@@ -1272,8 +1272,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Pillar
-  detailedDescription: Concrete support pillar in the middle of the room
+  labelName: Tiang
+  detailedDescription: Tiang penyangga beton di tengah ruangan
   category: 1
   isCustomUserSaved: 0
   simulateApproachingUser: 0
@@ -1414,11 +1414,11 @@ MonoBehaviour:
   waypointReachThreshold: 1.1
   navigationInstructionInterval: 3.5
   destinations:
-  - destinationName: Door
+  - destinationName: Pintu
     waypoints:
     - {fileID: 1676204295}
     - {fileID: 1712998274}
-  - destinationName: Desk
+  - destinationName: Meja
     waypoints:
     - {fileID: 1440403125}
     - {fileID: 1202205004}
@@ -1655,8 +1655,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Exit door
-  detailedDescription: Room exit door at the front wall
+  labelName: Pintu
+  detailedDescription: Pintu keluar ruangan di dinding depan
   category: 0
   isCustomUserSaved: 0
   simulateApproachingUser: 0
@@ -1779,8 +1779,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Person
-  detailedDescription: Person nearby in the room
+  labelName: Orang
+  detailedDescription: Seseorang berada di dekat Anda di dalam ruangan
   category: 2
   isCustomUserSaved: 0
   simulateApproachingUser: 0
@@ -1967,8 +1967,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Coffee mug
-  detailedDescription: Warm ceramic coffee mug on the right
+  labelName: Cangkir
+  detailedDescription: Cangkir keramik hangat di sebelah kanan
   category: 0
   isCustomUserSaved: 0
   simulateApproachingUser: 0
@@ -2316,8 +2316,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Small box
-  detailedDescription: Small storage box on the left
+  labelName: Kotak
+  detailedDescription: Kotak penyimpanan kecil di sebelah kiri
   category: 0
   isCustomUserSaved: 0
   simulateApproachingUser: 0
@@ -2557,8 +2557,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee9342c08487945839a01f2de05d57f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  labelName: Water bottle
-  detailedDescription: Blue 600 milliliter water bottle
+  labelName: Botol minum
+  detailedDescription: Botol air minum biru 600 mililiter
   category: 0
   isCustomUserSaved: 0
   simulateApproachingUser: 0
