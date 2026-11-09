@@ -28,6 +28,22 @@ os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;lo
 import cv2  # noqa: E402
 from ultralytics import YOLO  # noqa: E402
 
+# Default smart remappings for indoor room / assistive context.
+# Standard COCO lacks 'shelf', so large vertical racks/shelves get classified as 'refrigerator'.
+DEFAULT_LABEL_REMAPS = {
+    "refrigerator": "shelf",
+}
+
+
+def parse_remaps(remap_str):
+    remaps = dict(DEFAULT_LABEL_REMAPS)
+    if remap_str:
+        for pair in remap_str.split(","):
+            if ":" in pair:
+                src, dst = pair.split(":", 1)
+                remaps[src.strip().lower()] = dst.strip().lower()
+    return remaps
+
 # Open-vocabulary classes used with a YOLO-World model (--model yolov8s-worldv2.pt).
 # Spoken labels match the Unity voice vocabulary.
 WORLD_CLASSES = [
@@ -217,20 +233,46 @@ def main():
     ap.add_argument("--source", help="Use another video source instead, e.g. 0 for the laptop webcam")
     ap.add_argument("--quality", default="live_low", choices=["live_low", "live_med", "live_high"],
                     help="Device Portal stream quality (lower = less delay)")
-    ap.add_argument("--model", default="yolo11n.pt",
-                    help="yolo11n.pt (fast, 80 everyday classes) or yolov8s-worldv2.pt (slower, also door/stairs)")
+    ap.add_argument("--model", default="yolo11s.pt",
+                    help="yolo11s.pt (accurate, 80 everyday classes), yolo11n.pt (faster), or yolov8s-worldv2.pt (also door/stairs)")
     ap.add_argument("--imgsz", type=int, default=640)
-    ap.add_argument("--conf", type=float, default=0.35)
+    ap.add_argument("--conf", type=float, default=0.25,
+                    help="Confidence threshold (default 0.25 for better detection of books/smaller objects)")
+    ap.add_argument("--remap", default=None,
+                    help="Label remapping, e.g. 'refrigerator:shelf' (default: refrigerator -> shelf)")
     ap.add_argument("--device", default=None, help="cpu, 0 for the first NVIDIA GPU (default: auto)")
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
 
     source = build_source(args)
-    print(f"[model] Loading {args.model} (first run downloads it)...")
-    model = YOLO(args.model)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = args.model
+    if not os.path.exists(model_path):
+        candidate = os.path.join(script_dir, args.model)
+        if os.path.exists(candidate):
+            model_path = candidate
+
+    print(f"[model] Loading {model_path} (first run downloads it)...")
+    model = YOLO(model_path)
     if "world" in args.model.lower():
         model.set_classes(WORLD_CLASSES)
         print("[model] YOLO-World classes:", ", ".join(WORLD_CLASSES))
+
+    remaps = parse_remaps(args.remap)
+    if remaps:
+        names_dict = getattr(getattr(model, "model", None), "names", None)
+        if names_dict is None and hasattr(model, "names") and isinstance(model.names, dict):
+            names_dict = model.names
+        if isinstance(names_dict, dict):
+            remapped_names = []
+            for k, v in list(names_dict.items()):
+                low = str(v).lower()
+                if low in remaps:
+                    target = remaps[low]
+                    names_dict[k] = target
+                    remapped_names.append(f"{v} -> {target}")
+            if remapped_names:
+                print(f"[model] Applied label remapping: {', '.join(remapped_names)}")
 
     shared = Shared()
     threading.Thread(target=grab_frames, args=(source, shared), daemon=True).start()

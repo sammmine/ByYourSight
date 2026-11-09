@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using ByYourSight.Audio;
 
@@ -28,6 +29,29 @@ namespace ByYourSight.Perception
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _lastPersonSampleTime = new Dictionary<TrackableObject, float>();
 
+        [System.Serializable]
+        private class SavedSpatialAnchorData
+        {
+            public string label;
+            public float x;
+            public float y;
+            public float z;
+        }
+
+        [System.Serializable]
+        private class SavedSpatialAnchorCollection
+        {
+            public List<SavedSpatialAnchorData> anchors = new List<SavedSpatialAnchorData>();
+        }
+
+        private static string SavedAnchorsFilePath =>
+            Path.Combine(Application.persistentDataPath, "saved_spatial_anchors.json");
+
+        private void Start()
+        {
+            LoadSavedAnchorsFromDisk();
+        }
+
         private void Update()
         {
             MonitorApproachingPeople();
@@ -55,15 +79,14 @@ namespace ByYourSight.Perception
             Transform head = Camera.main.transform;
             Ray gazeRay = new Ray(head.position, head.forward);
 
-            if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
+            if (TryFindBestTargetInGaze(gazeRay, head, out RaycastHit hit, out TrackableObject trackable, out Vector3 targetPoint, out float rawDistance))
             {
-                TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
                 string objName = trackable != null ? trackable.labelName : SurfaceClassifier.Describe(hit, head);
-                float dist = Mathf.Max(0.5f, Mathf.Round(hit.distance * 2f) / 2f); // Round to nearest 0.5m
+                float dist = Mathf.Max(0.5f, Mathf.Round(rawDistance * 2f) / 2f); // Round to nearest 0.5m
                 string distText = Mathf.Approximately(dist, 1f)
                     ? "1 meter"
                     : (dist % 1f == 0f ? $"{(int)dist} meters" : $"{dist:0.0} meters");
-                string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, hit.point);
+                string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, targetPoint);
 
                 string shortMsg = $"{objName}, {distText}, {dirText}";
                 string detailMsg = trackable != null && !string.IsNullOrEmpty(trackable.detailedDescription)
@@ -76,14 +99,14 @@ namespace ByYourSight.Perception
                 }
                 else
                 {
-                    SpawnTemporaryRealWorldHighlightBox(hit.point, TrackableObject.HighContrastYellow, 3.0f);
+                    SpawnTemporaryRealWorldHighlightBox(targetPoint, TrackableObject.HighContrastYellow, 3.0f);
                 }
 
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
+                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, targetPoint);
                 PriorityAudioManager.Instance.EnqueueSpeech(
                     shortMsg,
                     AudioPriority.P3_ObjectIdentity,
-                    hit.point,
+                    targetPoint,
                     detailMsg
                 );
             }
@@ -95,6 +118,115 @@ namespace ByYourSight.Perception
                     AudioPriority.P3_ObjectIdentity
                 );
             }
+        }
+
+        /// <summary>
+        /// Selects the best target for "What is this?":
+        ///   1. Never reports SemanticObjectCategory.Person (so a user's own hand/arm or nearby person never blocks objects).
+        ///   2. Prioritizes EverydayObject / custom saved objects first, then HazardObstacle objects (chair, table, door),
+        ///      and only falls back to untagged Spatial Mesh surfaces if no TrackableObject is in the gaze cone.
+        /// </summary>
+        private bool TryFindBestTargetInGaze(
+            Ray gazeRay,
+            Transform head,
+            out RaycastHit bestHit,
+            out TrackableObject bestTrackable,
+            out Vector3 targetPoint,
+            out float targetDistance)
+        {
+            bestHit = default;
+            bestTrackable = null;
+            targetPoint = Vector3.zero;
+            targetDistance = 0f;
+
+            RaycastHit[] hits = Physics.SphereCastAll(gazeRay, gazeSphereRadius, maxGazeDistance);
+
+            bool foundObject = false;
+            int bestObjectPriority = int.MaxValue;
+            float bestObjectDist = float.MaxValue;
+
+            bool foundSurface = false;
+            RaycastHit closestSurfaceHit = default;
+            float closestSurfaceDist = float.MaxValue;
+
+            foreach (RaycastHit h in hits)
+            {
+                TrackableObject t = h.collider.GetComponentInParent<TrackableObject>();
+                if (t != null)
+                {
+                    // Never identify a person on "What is this?"
+                    if (t.category == SemanticObjectCategory.Person)
+                        continue;
+
+                    // Priority 0 = EverydayObject or custom saved item; Priority 1 = larger furniture/hazard obstacle
+                    int priority = (t.isCustomUserSaved || t.category == SemanticObjectCategory.EverydayObject) ? 0 : 1;
+                    float dist = h.distance > 0.01f ? h.distance : Vector3.Distance(head.position, t.transform.position);
+
+                    if (priority < bestObjectPriority || (priority == bestObjectPriority && dist < bestObjectDist))
+                    {
+                        bestObjectPriority = priority;
+                        bestObjectDist = dist;
+                        bestHit = h;
+                        bestTrackable = t;
+                        targetPoint = h.distance > 0.01f ? h.point : t.transform.position;
+                        targetDistance = dist;
+                        foundObject = true;
+                    }
+                }
+                else if (h.distance > 0.01f && h.distance < closestSurfaceDist)
+                {
+                    closestSurfaceDist = h.distance;
+                    closestSurfaceHit = h;
+                    foundSurface = true;
+                }
+            }
+
+            if (foundObject)
+                return true;
+
+            // Fallback: check if any non-Person TrackableObject is within a 20-degree cone of head gaze
+            // (handles slight PV camera pitch offset on HoloLens 2 when holding small objects in front of the visor)
+            TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
+            float bestAngleScore = float.MaxValue;
+            foreach (TrackableObject t in allObjects)
+            {
+                if (t == null || t.category == SemanticObjectCategory.Person)
+                    continue;
+
+                Vector3 toObj = t.transform.position - head.position;
+                float dist = toObj.magnitude;
+                if (dist > maxGazeDistance || dist < 0.1f)
+                    continue;
+
+                float angle = Vector3.Angle(head.forward, toObj);
+                if (angle <= 20f)
+                {
+                    int priority = (t.isCustomUserSaved || t.category == SemanticObjectCategory.EverydayObject) ? 0 : 1;
+                    float score = priority * 100f + angle;
+                    if (score < bestAngleScore)
+                    {
+                        bestAngleScore = score;
+                        bestTrackable = t;
+                        targetPoint = t.transform.position;
+                        targetDistance = dist;
+                        foundObject = true;
+                    }
+                }
+            }
+
+            if (foundObject)
+                return true;
+
+            if (foundSurface)
+            {
+                bestHit = closestSurfaceHit;
+                bestTrackable = null;
+                targetPoint = closestSurfaceHit.point;
+                targetDistance = closestSurfaceHit.distance;
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -166,7 +298,7 @@ namespace ByYourSight.Perception
         }
 
         /// <summary>
-        /// Labels of every real-room tag the user has saved this session ("List saved").
+        /// Labels of every real-room tag the user has saved (persisted across app restarts).
         /// </summary>
         public List<string> GetSavedLabels()
         {
@@ -179,7 +311,94 @@ namespace ByYourSight.Perception
             return labels;
         }
 
-        private TrackableObject CreateRealWorldSpatialAnchor(Vector3 worldPos, string label)
+        public void ClearSavedAnchors()
+        {
+            foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
+            {
+                if (IsRealWorldAnchor(existing))
+                {
+                    Destroy(existing.gameObject);
+                }
+            }
+
+            try
+            {
+                string path = SavedAnchorsFilePath;
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    Debug.Log($"[ObjectRecognizer] Cleared persistent anchors file: {path}");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[ObjectRecognizer] Failed to delete saved anchors: {ex.Message}");
+            }
+        }
+
+        private void SaveAnchorsToDisk()
+        {
+            try
+            {
+                SavedSpatialAnchorCollection collection = new SavedSpatialAnchorCollection();
+                foreach (TrackableObject t in FindObjectsOfType<TrackableObject>())
+                {
+                    if (IsRealWorldAnchor(t))
+                    {
+                        Vector3 pos = t.transform.position;
+                        collection.anchors.Add(new SavedSpatialAnchorData
+                        {
+                            label = t.labelName,
+                            x = pos.x,
+                            y = pos.y,
+                            z = pos.z
+                        });
+                    }
+                }
+
+                string json = JsonUtility.ToJson(collection, true);
+                File.WriteAllText(SavedAnchorsFilePath, json);
+                Debug.Log($"[ObjectRecognizer] Persisted {collection.anchors.Count} anchor(s) to {SavedAnchorsFilePath}");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[ObjectRecognizer] Failed to persist anchors: {ex.Message}");
+            }
+        }
+
+        public void LoadSavedAnchorsFromDisk()
+        {
+            try
+            {
+                string path = SavedAnchorsFilePath;
+                if (!File.Exists(path))
+                    return;
+
+                string json = File.ReadAllText(path);
+                SavedSpatialAnchorCollection collection = JsonUtility.FromJson<SavedSpatialAnchorCollection>(json);
+                if (collection == null || collection.anchors == null)
+                    return;
+
+                int loaded = 0;
+                foreach (SavedSpatialAnchorData data in collection.anchors)
+                {
+                    if (string.IsNullOrWhiteSpace(data.label))
+                        continue;
+
+                    Vector3 pos = new Vector3(data.x, data.y, data.z);
+                    CreateRealWorldSpatialAnchor(pos, data.label, persist: false);
+                    loaded++;
+                }
+
+                Debug.Log($"[ObjectRecognizer] Restored {loaded} persistent spatial anchor(s) from disk");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[ObjectRecognizer] Failed to load saved anchors: {ex.Message}");
+            }
+        }
+
+        private TrackableObject CreateRealWorldSpatialAnchor(Vector3 worldPos, string label, bool persist = true)
         {
             // Saving the same label again moves the tag instead of creating a duplicate
             foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
@@ -214,6 +433,12 @@ namespace ByYourSight.Perception
             trackable.detailedDescription = $"Real-world anchored object ({label})";
             trackable.category = SemanticObjectCategory.EverydayObject;
             trackable.isCustomUserSaved = true;
+
+            if (persist)
+            {
+                SaveAnchorsToDisk();
+            }
+
             return trackable;
         }
 

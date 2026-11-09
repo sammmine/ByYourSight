@@ -2,178 +2,325 @@
 
 **By Your Sight** adalah prototipe aplikasi Mixed Reality / AR asistif berbasis **Unity 2022.3 LTS (URP + OpenXR)** untuk **Microsoft HoloLens 2** yang dirancang sebagai pendamping navigasi ruang dan pengenalan objek berbasis *3D Spatial Audio* bagi penyandang tunanetra dan *low-vision*.
 
-Nama **"By Your Sight"** memiliki makna ganda: *"By Your Side"* (selalu mendampingi di sisi pengguna) sekaligus *"By Your Sight"* (menguatkan sisa penglihatan pengguna melalui kombinasi *audio-first* dan *high-contrast visual-assist*).
+Nama **"By Your Sight"** memiliki makna ganda: *"By Your Side"* (selalu mendampingi di sisi pengguna) sekaligus *"By Your Sight"* (menguatkan sisa penglihatan pengguna melalui perpaduan *audio-first* dan *high-contrast visual-assist*).
 
 ---
 
 ## Daftar Isi
-1. [Prinsip Desain & Hierarki Prioritas Audio (T3)](#1-prinsip-desain--hierarki-prioritas-audio-t3)
-2. [Penyesuaian Teknis dari Dokumen Rancangan T3](#2-penyesuaian-teknis-dari-dokumen-rancangan-t3)
-3. [Fitur Tambahan pada Implementasi Prototipe](#3-fitur-tambahan-pada-implementasi-prototipe)
-4. [Arsitektur Sistem](#4-arsitektur-sistem)
-5. [Struktur Kode & Pemetaan Kebutuhan Fungsional (KF01–KF08)](#5-struktur-kode--pemetaan-kebutuhan-fungsional-kf01kf08)
-6. [Kosakata Perintah Suara (Native HoloLens 2)](#6-kosakata-perintah-suara-native-hololens-2)
-7. [Cara Menjalankan & Menguji di Unity Editor](#7-cara-menjalankan--menguji-di-unity-editor)
+1. [Prinsip Desain & Hierarki Prioritas Audio](#1-prinsip-desain--hierarki-prioritas-audio-t3)
+2. [Arsitektur Sistem Terpadu](#2-arsitektur-sistem-terpadu)
+3. [Prasyarat & Persiapan Lingkungan](#3-prasyarat--persiapan-lingkungan)
+4. [Setup & Menjalankan AI Detection Server (YOLO)](#4-setup--menjalankan-ai-detection-server-yolo)
+5. [Menjalankan & Menguji di Unity Editor (Play Mode)](#5-menjalankan--menguji-di-unity-editor-play-mode)
+6. [Panduan Deployment ke Microsoft HoloLens 2](#6-panduan-deployment-ke-microsoft-hololens-2)
+7. [Fitur Persepsi & Spatial Anchoring Permanen](#7-fitur-persepsi--spatial-anchoring-permanen)
+8. [Kosakata Lengkap Perintah Suara (Voice Commands)](#8-kosakata-lengkap-perintah-suara-voice-commands)
+9. [Struktur Kode & Pemetaan Modul (KF01–KF08)](#9-struktur-kode--pemetaan-modul-kf01kf08)
+10. [Troubleshooting & Solusi Masalah Umum](#10-troubleshooting--solusi-masalah-umum)
 
 ---
 
-## 1. Prinsip Desain & Hierarki Prioritas Audio (T3)
+## 1. Prinsip Desain & Hierarki Prioritas Audio
 
-Sesuai spesifikasi desain pada dokumen **Milestone 3 (T3)**, aplikasi ini menerapkan prinsip:
-- **Audio-first, visual-assist:** Seluruh informasi wajib tersedia melalui audio spasial, sedangkan lapisan visual kontras tinggi pada layar *additive* HoloLens berfungsi sebagai penguat bagi pengguna *low-vision* (Kuning = Info/Target, Merah/Oranye = Bahaya, Hijau = Sukses).
-- **Singkat dulu, detail jika diminta:** Pola kalimat tetap **`[What] + [Distance] + [Direction]`** (maksimal 6–8 kata, menggunakan arah relatif tubuh: *ahead*, *slightly right*, *right*, *slightly left*, *left*, *behind*). Detail tambahan hanya diucapkan jika pengguna meminta `"Details"`.
-- **Jangan menutupi suara lingkungan:** Volume beradaptasi terhadap kebisingan sekitar (KF06) dan mendukung perintah/gestur *Mute* cepat.
-- **Keselamatan di atas segalanya:** Seluruh output suara melewati satu antrian prioritas terpusat (`PriorityAudioManager`):
+- **Audio-first, visual-assist:** Semua informasi primer disampaikan via audio spasial 3D. Tampilan visual kontras tinggi pada layar *additive* HoloLens 2 bertindak sebagai penguat sisa penglihatan pengguna (*Kuning = Info/Target, Merah/Oranye = Bahaya, Hijau = Sukses*).
+- **Singkat dulu, detail jika diminta:** Pola kalimat singkat `[What] + [Distance] + [Direction]` (maksimal 6–8 kata, mengacu arah tubuh: *ahead*, *slightly right*, *right*, *slightly left*, *left*, *behind*). Detail lengkap diucapkan jika pengguna meminta `"Details"`.
+- **Adaptasi terhadap lingkungan:** Volume audio otomatis beradaptasi terhadap kebisingan sekitar serta mendukung perintah *Mute* cepat.
+- **Keselamatan di atas segalanya:** Seluruh output suara dikelola satu gerbang prioritas terpusat (`PriorityAudioManager`):
 
 | Prioritas | Jenis Informasi | Contoh Output Suara | Perilaku Antrian |
 | :--- | :--- | :--- | :--- |
-| **P0** | Alarm Bahaya (KF07) | *"Warning! Pillar, 1 meter, ahead"* | Memotong semua suara lain seketika, **tidak bisa di-mute**, disertai *double-beep* tajam. |
-| **P1** | Instruksi Navigasi & Beacon (KF03, KF05) | *"Turn left, 2 meters"* / *"Straight ahead, 2 meters"* | Menunda pesan **P2** dan **P3**; memperbarui instruksi rute terbaru. |
-| **P2** | Informasi Sosial (KF08) | *"Person approaching, right"* | Diantrikan di bawah P0 & P1; menjaga privasi tanpa menyimpan identitas wajah. |
-| **P3** | Identifikasi Objek & Konfirmasi (KF01, KF02) | *"Water bottle, 1.5 meters, ahead"* | Diantrikan paling akhir; dapat dibisukan (*mute*) kapan saja oleh pengguna. |
+| **P0** | Alarm Bahaya (KF07) | *"Warning! Pillar, 1 meter, ahead"* | Memotong semua audio lain seketika, **kebal terhadap Mute**, disertai *double-beep* tajam. |
+| **P1** | Instruksi Rute & Navigasi (KF03, KF05) | *"Turn left, 2 meters"* / *"Straight ahead, 2 meters"* | Menunda P2 dan P3; memperbarui instruksi arah rute. |
+| **P2** | Informasi Sosial (KF08) | *"Person approaching, right"* | Diantrikan di bawah P0 & P1; menjaga privasi tanpa merekam identitas wajah. |
+| **P3** | Identifikasi Objek (KF01, KF02) | *"Water bottle, 1.5 meters, ahead"* | Diantrikan paling akhir; dapat dibisukan (*mute*) kapan saja. |
 
 ---
 
-## 2. Penyesuaian Teknis dari Dokumen Rancangan T3
+## 2. Arsitektur Sistem Terpadu
 
-Berdasarkan evaluasi *Technical Constraints* pada dokumen T3 terkait keterbatasan perangkat keras **Microsoft HoloLens 2** (prosesor ARM64 Qualcomm Snapdragon 850 dan tidak tersedianya Bahasa Indonesia pada sistem operasi bawaan *Windows Holographic OS*), dilakukan penyesuaian berikut:
+Sistem memadukan **komputasi sensor lokal di HoloLens 2** (untuk navigasi rintangan 0 ms lag) dengan **server laptop AI YOLO** (untuk deteksi objek visual kamera):
 
-| Aspek pada Dokumen T3 | Rancangan Awal di T3 | Implementasi Final (`ByYourSight`) | Alasan Teknis & Optimasi Komputasi |
-| :--- | :--- | :--- | :--- |
-| **Mesin Speech-to-Text (KF04) & TTS** | Menggunakan **Azure Speech Cloud (`id-ID`)** yang membutuhkan koneksi internet aktif. | Diubah ke **100% Native Offline HoloLens 2**: `KeywordRecognizer` (`UnityEngine.Windows.Speech`) & `SpeechSynthesizer` (`Windows.Media.SpeechSynthesis`). | Diproses langsung oleh co-processor/DSP bawaan HoloLens 2 (beban CPU hampir 0%), bebas latensi jaringan Wi-Fi, tidak menguras baterai/memicu *thermal throttling*, dan bebas masalah kompatibilitas DLL Azure pada ARM64. |
-| **Kosakata Perintah Suara (KF04)** | Bahasa Indonesia (*"Ini apa?"*, *"Simpan benda"*, *"Cari [benda]"*, *"Antar ke [tujuan]"*, *"Diam"/"Lanjut"*, *"Ulangi"*, *"Detail"*, *"Bantuan"*, *"Batal"*). | Bahasa Inggris Native (*"What is this?"*, *"Save object"*, *"Find [item]"*, *"Navigate to [dest]"*, *"Mute"/"Resume"*, *"Repeat"*, *"Details"*, *"Help"*, *"Cancel"*). | Mengikuti bahasa yang didukung secara *native* dan *offline* oleh Windows Speech API di HoloLens 2. |
-| **Pola Kalimat Output TTS** | Bahasa Indonesia dengan pola `[Apa] + [Jarak] + [Arah]` (≤ 6–8 kata, arah tubuh). | Struktur kalimat **tetap sama persis** sesuai Design System T3 dalam Bahasa Inggris: `[What] + [Distance] + [Direction]`. | Mempertahankan konsistensi aturan kognitif dan *Design System* T3 dalam bahasa *native* perangkat. |
-
----
-
-## 3. Fitur Tambahan pada Implementasi Prototipe
-
-Untuk mendukung pengujian *usability* dan simulasi *Wizard of Oz* sebagaimana direncanakan pada dokumen T3, implementasi ini menambahkan:
-
-1. **Synthesizer Earcon Prosedural (`PriorityAudioManager.PlayEarcon`):**
-   - Menghasilkan 4 jenis *earcon* sesuai spesifikasi T3 (*Listening Start/End*, *Success/Failure* dengan nada naik/turun, *Spatial Beacon* yang berubah frekuensi & *pitch*, serta *Danger Alarm* berupa *double-beep* tajam) secara matematika di C# tanpa ketergantungan file `.wav` eksternal.
-2. **Cross-Platform TTS Fallback (UWP HoloLens 2 & macOS Editor):**
-   - Menggunakan `Windows.Media.SpeechSynthesis` secara *native* saat di-*build* ke UWP HoloLens 2 (`WINDOWS_UWP`), serta otomatis beralih menggunakan synthesizer suara *Samantha* bawaan macOS (`UNITY_EDITOR_OSX`) saat diuji di laptop Mac.
-3. **Simulator *Wizard of Oz* & Pengujian Constraint T3 (`VoiceAndGestureController.OnGUI`):**
-   - Kontrol pergerakan ruangan (`WASD`) dan rotasi pandangan kepala (`Q`/`E` atau klik kanan *mouse*) di Unity Editor.
-   - Simulasi kondisi **cahaya redup** (`simulateLowLightWarning` untuk menguji respons *"Not sure, low light. Move closer to the object"*).
-   - *Slider* **Ambient Noise RMS** untuk menguji adaptasi volume otomatis (KF06).
-   - Tombol pemicu **Approaching Person** untuk menyimulasikan orang berjalan mendekati pengguna (KF08).
-4. **One-Click Indoor Scene Builder (`ByYourSightSceneSetup.cs`):**
-   - Menu kustom di Unity Editor (`By Your Sight > Setup Demo Prototype Scene (KF01 - KF08)`) yang membangun lingkungan ruangan indoor lengkap dengan objek sehari-hari, rintangan tiang/kursi, karakter orang sekitar, dan graf *waypoint* lokal menuju Pintu serta Meja.
-
----
-
-## 4. Arsitektur Sistem
-
-Seluruh modul persepsi, navigasi, dan keselamatan tidak membunyikan speaker secara langsung, melainkan mengirim permintaan ke gerbang audio terpusat (`PriorityAudioManager`) agar tidak terjadi tabrakan suara antar-fitur:
+```
+HoloLens 2 Kamera ──(Device Portal Stream)──► detection_server.py (YOLO11s)
+                                                      │
+                                                (JSON Detections)
+                                                      ▼
+HoloLens 2 (Audio & Visual) ◄──(Holographic Remoting / UWP)── Unity Engine (RealWorldObjectDetector)
+```
 
 ```mermaid
 flowchart TD
-    subgraph InputLayer["Lapisan Input & Sensor (HoloLens 2 / Editor Simulator)"]
-        Gaze["Head Gaze & Camera Transform"]
-        Depth["Spatial Mesh / Physics SphereCast"]
-        Mic["Microphone (Native KeywordRecognizer & Ambient RMS)"]
+    subgraph EdgeDevice["Microsoft HoloLens 2 / Sensor Hardware"]
+        Head["Head Tracking & Gaze Raycast"]
+        Mesh["Spatial Mesh LiDAR (Dinding, Lantai, Rintangan)"]
+        Mic["Microphone (Windows Speech Recognition Offline)"]
+        Cam["Photo/Video (PV) Camera Stream"]
     end
 
-    subgraph ControllerLayer["Kontrol Input & Gestur"]
-        VGC["VoiceAndGestureController.cs\n• Parser Perintah Suara (KF04)\n• Gestur / Toggle Mute (KF06)\n• Kalkulasi Volume Adaptif (KF06)"]
+    subgraph AIServer["Laptop Object Detection Server (Python 3.11)"]
+        PortalReader["Device Portal / Webcam Stream"]
+        YOLO["YOLO11s Detection Engine (yolo11s.pt)\n• Label Remapping: refrigerator -> shelf\n• Confidence Threshold: 0.25"]
+        JSONEndpoint["HTTP Server (http://127.0.0.1:8765)\n• /preview.jpg (Live Web UI)\n• /detections (JSON)"]
     end
 
-    subgraph CoreModules["Modul Persepsi, Navigasi & Keselamatan"]
-        OD["ObstacleDetector.cs (KF07)\n• Deteksi Rintangan tiap 0.15s (≤ 300ms)"]
-        SBN["SpatialBeaconAndNavigator.cs\n• Spatial Audio Beacon Sudut 15° (KF03)\n• Navigasi Graf Waypoint Lokal (KF05)"]
-        OR["ObjectRecognizer.cs\n• Identifikasi Objek Gaze (KF01)\n• Simpan Label Benda Lokal (KF02)\n• Deteksi Orang Mendekat (KF08)"]
+    subgraph UnityCore["Unity Core Subsystems (ByYourSight)"]
+        OD["ObstacleDetector.cs (KF07)\n• Anti-Overstimulation & Anti-Spam Cooldown\n• Abaikan Person/Tangan Sendiri"]
+        OR["ObjectRecognizer.cs (KF01, KF02, KF08)\n• Gaze Target Selection (Cone Fallback)\n• Persistent Storage: saved_spatial_anchors.json"]
+        SBN["SpatialBeaconAndNavigator.cs (KF03, KF05)\n• Spatial Audio Beacon (15° cone)\n• Waypoint Graph Routing"]
+        VGC["VoiceAndGestureController.cs (KF04, KF06)\n• English Offline KeywordRecognizer\n• Adaptive Noise Volume Monitor"]
+        RWOD["RealWorldObjectDetector.cs\n• Polling JSON dari AI Server\n• Estimasi Jarak Benda Genggam"]
+        PAM["PriorityAudioManager.cs\n• Central Priority Queue (P0-P3)\n• Procedural Earcon Synthesizer\n• UWP / Windows / macOS Native TTS"]
     end
 
-    subgraph AudioGate["Gerbang Audio Terpusat (PriorityAudioManager.cs)"]
-        P0["P0: Danger Alarm (KF07)\nPotong semua suara, Bypass Mute"]
-        P1["P1: Navigation (KF03/KF05)\nTunda P2 & P3"]
-        P2["P2: Social Info (KF08)\nAntrian Prioritas Menengah"]
-        P3["P3: Object Identity (KF01/KF02)\nAntrian Prioritas Rendah"]
+    subgraph UserFeedback["Output Multi-Modal ke Pengguna"]
+        Audio["3D Spatial Sound (Speaker Visor HoloLens 2)"]
+        Visual["Additive Display (High-Contrast 3D Bounding Boxes)"]
     end
 
-    subgraph OutputLayer["Lapisan Output Multi-Modal"]
-        SpatialAudio["3D Spatial AudioSource\n• Procedural Earcons\n• Native UWP TTS / macOS TTS"]
-        VisualHighlight["TrackableObject.cs (Additive Visual Assist)\n• Kuning: Info/Target\n• Merah/Oranye: Bahaya\n• Hijau: Sukses"]
-    end
-
-    Gaze --> OR
-    Gaze --> SBN
-    Depth --> OD
+    Cam --> PortalReader --> YOLO --> JSONEndpoint --> RWOD
+    Head --> OR & SBN
+    Mesh --> OD & OR
     Mic --> VGC
 
-    VGC --> OR
-    VGC --> SBN
-    VGC --> AudioGate
+    OD -->|P0 Danger| PAM
+    SBN -->|P1 Navigation| PAM
+    OR -->|P2 Person / P3 Object| PAM
+    RWOD -->|Update Bounding Boxes| OR
 
-    OD -->|EnqueueSpeech P0| P0
-    SBN -->|EnqueueSpeech P1 & PlayEarcon| P1
-    OR -->|EnqueueSpeech P2| P2
-    OR -->|EnqueueSpeech P3| P3
-
-    OD -->|TriggerVisualHighlight| VisualHighlight
-    SBN -->|TriggerVisualHighlight| VisualHighlight
-    OR -->|TriggerVisualHighlight| VisualHighlight
-
-    P0 --> SpatialAudio
-    P1 --> SpatialAudio
-    P2 --> SpatialAudio
-    P3 --> SpatialAudio
+    PAM --> Audio
+    OR & OD & SBN --> Visual
 ```
 
 ---
 
-## 5. Struktur Kode & Pemetaan Kebutuhan Fungsional (KF01–KF08)
+## 3. Prasyarat & Persiapan Lingkungan
 
-Seluruh skrip berada di direktori `Assets/Scripts/`:
+### Kebutuhan Perangkat Keras:
+* **Microsoft HoloLens 2** (dengan mode pengembang aktif).
+* **Laptop Windows 10/11** (untuk build UWP / Holographic Remoting & menjalankan AI Server).
+* *(Pengembangan skrip & simulasi Play Mode juga dapat dilakukan di macOS menggunakan Unity Editor).*
 
-- `Assets/Scripts/Audio/PriorityAudioManager.cs`
-  - Mengelola antrian prioritas audio (`P0`–`P3`), *cooldown* alarm bahaya, status *Mute* (KF06), fitur *"Repeat"* & *"Details"*, *synthesizer earcon* prosedural, kalkulasi arah relatif tubuh, serta *engine* TTS *native* UWP & macOS.
-- `Assets/Scripts/Perception/TrackableObject.cs`
-  - Komponen metadata objek (`EverydayObject`, `HazardObstacle`, `Person`) beserta sistem *high-contrast visual highlight* dan **3D Thick Bounding Box Outline (`LineRenderer`)** untuk layar *additive* HoloLens.
-- `Assets/Scripts/Perception/ObjectRecognizer.cs`
-  - **KF01 (`IdentifyObjectInGaze`):** Mengidentifikasi objek di arah pandang kepala dengan format `[What] + [Distance] + [Direction]`.
-  - **KF02 (`SaveCustomObjectInGaze`):** Menyimpan objek di arah pandang dengan label suara kustom milik pengguna.
-  - **KF08 (`MonitorApproachingPeople`):** Mendeteksi orang yang bergerak mendekati pengguna pada jarak `1.0m–3.0m` (`100 cm–300 cm`) dan memicu info sosial `P2`.
-- `Assets/Scripts/Navigation/SpatialBeaconAndNavigator.cs`
-  - **KF03 (`StartBeaconForObject` & `UpdateSpatialBeacon`):** Memandu pengguna memutar kepala menuju objek yang dicari menggunakan *3D Spatial Audio Beacon* (frekuensi ketukan makin cepat dan nada makin tinggi saat sudut kepala mendekati 0°, dengan konfirmasi saat masuk toleransi **15°**).
-  - **KF05 (`StartNavigationTo` & `UpdateWaypointNavigation`):** Memandu pengguna berjalan mengikuti rute *waypoint* lokal menuju tujuan (*Door* atau *Desk*) dengan instruksi pergantian arah pada jarak `1.0m` (`100 cm`) sebelum titik belok berprioritas `P1`.
-- `Assets/Scripts/Safety/ObstacleDetector.cs`
-  - **KF07 (`CheckObstaclesAhead`):** Melakukan `SphereCast` horizontal setiap `0.15` detik (memenuhi target latensi `< 300ms`) untuk mendeteksi rintangan bahaya pada jarak `< 1.5m` (`150 cm`) di jalur jalan pengguna dan memicu alarm `P0`.
-- `Assets/Scripts/Input/VoiceAndGestureController.cs`
-  - **KF04 & KF06:** Mengintegrasikan `KeywordRecognizer` *native* HoloLens 2, memproses perintah suara bahasa Inggris, mengatur adaptasi volume berdasarkan kebisingan lingkungan, dan menyediakan HUD simulator di Unity Editor.
-- `Assets/Scripts/Editor/ByYourSightSceneSetup.cs`
-  - Skrip otomatis Unity Editor untuk membangun seluruh *environment* dan komponen prototipe dalam satu klik.
+### Kebutuhan Perangkat Lunak:
+1. **Unity Hub & Unity 2022.3 LTS** (disarankan `2022.3.x` LTS):
+   * Modul: **Universal Windows Platform (UWP) Build Support**.
+2. **Visual Studio 2022** (Community atau Professional):
+   * Beban kerja (*Workload*): **Universal Windows Platform development**.
+   * Beban kerja (*Workload*): **Desktop development with C++**.
+   * Komponen individual: *Windows 10/11 SDK (10.0.19041.0 atau lebih baru)*, *USB Device Connectivity*, dan *MSVC v143 ARM64 build tools*.
+3. **Python 3.10–3.12** (untuk menjalankan `detection_server.py`).
 
 ---
 
-## 6. Kosakata Perintah Suara (Native HoloLens 2)
+## 4. Setup & Menjalankan AI Detection Server (YOLO)
 
-| Perintah Suara (English) | Pintasan Keyboard (Editor) | Fungsi Terkait | Contoh Respons Sistem |
+Server ini bertugas membaca stream kamera, memproses deteksi objek dengan model **YOLO11s**, dan menyediakan API JSON untuk Unity.
+
+### Langkah 1: Setup Lingkungan Python (Sekali Saja)
+
+**Di Windows (PowerShell):**
+```powershell
+cd Tools\ObjectDetectionServer
+py -3.11 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**Di macOS / Linux (Terminal):**
+```bash
+cd Tools/ObjectDetectionServer
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+> **Catatan Bobot Model (`yolo11s.pt`):** File model berukuran ±18 MB sudah tersimpan di dalam folder `Tools/ObjectDetectionServer/` sehingga tidak memerlukan unduhan dari internet.
+
+### Langkah 2: Mengaktifkan Windows Device Portal di HoloLens 2 (Sekali Saja)
+1. Di dalam HoloLens 2: Buka **Settings > Update & Security > For developers**.
+2. Aktifkan **Developer Mode** dan **Device Portal**.
+3. Di browser laptop, buka `https://<IP-HoloLens>` (lihat IP di *Settings > Network & Internet > Wi-Fi > Advanced options*). Abaikan peringatan SSL (*Advanced > Proceed*).
+4. Buat username dan password Device Portal saat pertama kali membukanya.
+
+### Langkah 3: Menjalankan Server
+
+**Opsi A — Uji Coba Cepat dengan Webcam Laptop (Tanpa HoloLens):**
+```bash
+python detection_server.py --source 0
+```
+
+**Opsi B — Menggunakan Kamera HoloLens 2 via Wi-Fi:**
+```bash
+python detection_server.py --portal https://<IP-HoloLens> --user USERNAME --password PASSWORD
+```
+
+**Opsi C — Menggunakan Kamera HoloLens 2 via Kabel USB-C:**
+```bash
+python detection_server.py --portal http://127.0.0.1:10080 --user USERNAME --password PASSWORD
+```
+
+### Langkah 4: Membuka Web Preview
+Buka browser laptop di:
+👉 **`http://127.0.0.1:8765/`**
+Anda dapat melihat tampilan kamera real-time lengkap dengan kotak deteksi, label, FPS, serta waktu inferensi.
+
+### Fitur Pintar Server:
+* **Smart Label Remapping:** Label `refrigerator` otomatis diubah menjadi **`shelf`** (rak), mengatasi keterbatasan dataset COCO pada perabot ruangan.
+* **Tuning Confidence (`--conf 0.25`):** Ambang batas deteksi diatur optimal agar buku tertutup dan benda kecil mudah tertangkap.
+* **Argumen Tambahan:**
+  * `--model yolov8s-worldv2.pt` : Mengaktifkan model open-vocabulary (mengenali pintu & tangga).
+  * `--device 0` : Menggunakan GPU NVIDIA (jika laptop memilikinya).
+  * `--remap "refrigerator:shelf,dining table:desk"` : Kustomisasi mapping label.
+
+---
+
+## 5. Menjalankan & Menguji di Unity Editor (Play Mode)
+
+1. Buka folder `ByYourSight` di **Unity Hub** (Unity 2022.3 LTS).
+2. Buka scene `Assets/Scenes/SampleScene.unity`.
+3. Klik tombol **Play (▶)** di bagian atas Unity Editor.
+4. **Navigasi Simulator di Editor:**
+   * **Berjalan:** Gunakan tombol keyboard **`W` `A` `S` `D`**.
+   * **Menoleh / Arah Pandang:** Tahan **Klik Kanan Mouse** atau tekan **`Q` / `E`**. Arahkan tanda reticle **`+` kuning** di tengah layar ke objek.
+   * **Mode Real Room vs Simulasi:** Tekan tombol **`R`** untuk beralih antara simulasi dummy ruangan dan ruangan nyata.
+   * **Mute Cepat:** Tekan tombol **`M`** untuk simulasi gestur mute.
+5. **Panel HUD Simulator:**
+   Panel di sisi kiri menampilkan status Camera AI, label yang terlihat, slider kebisingan lingkungan, serta tombol cepat untuk memicu fungsi KF01–KF08.
+
+---
+
+## 6. Panduan Deployment ke Microsoft HoloLens 2
+
+### Konfigurasi Capabilities di Unity (Wajib Diperiksa)
+Buka **Edit > Project Settings > Player > tab UWP (ikon Windows Store) > Publishing Settings > Capabilities**, pastikan kotak berikut **dicentang**:
+* ✅ **`Microphone`** — Untuk KeywordRecognizer perintah suara dan pemantau kebisingan.
+* ✅ **`SpatialPerception`** — Untuk pemindaian Spatial Mesh rintangan di dunia nyata.
+* ✅ **`Webcam`** — Untuk akses kamera video perangkat.
+* Pada **Edit > Project Settings > XR Plug-in Management > tab UWP**, pastikan **`OpenXR`** dicentang bersama grup fitur **Microsoft HoloLens**.
+
+---
+
+### Metode A: Holographic Remoting (Paling Cepat untuk Demo & Pengujian)
+Metode ini menjalankan aplikasi di laptop dan melakukan streaming audio-visual serta sensor langsung ke HoloLens 2 secara instan tanpa proses build Visual Studio yang memakan waktu:
+
+1. Di HoloLens 2, instal dan jalankan aplikasi resmi **Holographic Remoting Player** dari Microsoft Store.
+2. Catat **IP Address** yang muncul di layar kacamata (misal `192.168.1.25`). Pastikan laptop dan HoloLens berada di jaringan Wi-Fi yang sama (atau terhubung via kabel USB-C).
+3. Di Unity Editor laptop Windows, buka menu:
+   **`Window > XR > Holographic Remoting for Play Mode`** (atau via *Project Settings > OpenXR*).
+4. Centang **`Enable Holographic Remoting for Play Mode`**, lalu masukkan IP HoloLens pada kolom **Remote Host Name**.
+5. Jalankan `detection_server.py` di terminal.
+6. Klik **Play (▶)** di Unity Editor. Tampilan hologram dan suara 3D akan langsung aktif di HoloLens 2 Anda!
+
+---
+
+### Metode B: Build & Deploy Standalone UWP (Aplikasi Mandiri Tanpa Laptop)
+
+#### Langkah 1: Build Solution dari Unity
+1. Di Unity Editor, buka **File > Build Settings**.
+2. Pastikan `SampleScene` berada di daftar *Scenes In Build*.
+3. Pilih platform **Universal Windows Platform**, klik **Switch Platform**.
+4. Atur parameter:
+   * **Target Device:** `HoloLens`
+   * **Architecture:** `ARM64`
+   * **Build Type:** `D3D Project`
+   * **Target SDK Version:** `Latest Installed`
+   * **Visual Studio Version:** `Latest Installed`
+5. Klik **Build**, buat folder tujuan bernama `Builds`, lalu tunggu hingga selesai.
+
+#### Langkah 2: Deploy dari Visual Studio 2022 ke Perangkat
+1. Buka file solusi **`Builds/ByYourSight.sln`** dengan Visual Studio 2022.
+2. Hubungkan HoloLens 2 ke laptop menggunakan kabel USB-C.
+3. Atur konfigurasi toolbar atas:
+   * Konfigurasi: **`Release`** (atau `Master`)
+   * Arsitektur: **`ARM64`**
+   * Target: **`Device`** (jika via USB) atau **`Remote Machine`** (jika via Wi-Fi)
+4. Tekan **`Ctrl + F5`** (*Debug > Start Without Debugging*).
+5. *(Jika pertama kali, masukkan PIN pairing dari HoloLens: Settings > Update & Security > For developers > Pair)*.
+6. Aplikasi akan terinstal permanen dan muncul di menu *All Apps* HoloLens 2.
+
+---
+
+## 7. Fitur Persepsi & Spatial Anchoring Permanen
+
+### A. Fitur "Save Object" Permanen
+Pengguna dapat menandai benda atau perabot di dunia nyata dan menyimpannya secara permanen:
+1. Tatap objek yang dituju (misal rak, tempat sampah, atau pintu).
+2. Ucapkan perintah suara: **`"Save object shelf"`** (atau *"Save shelf"*, *"Save door"*, *"Save trash bin"*).
+3. HoloLens menembakkan raycast LiDAR ke permukaan benda, memunculkan kotak kawat hijau 3D, dan membunyikan earcon konfirmasi.
+4. **Auto-Persist ke Disk:** Posisi 3D objek langsung ditulis ke storage lokal:
+   `Application.persistentDataPath/saved_spatial_anchors.json`.
+5. **Auto-Restore saat Aplikasi Dibuka Kembali:** Saat HoloLens dimatikan dan aplikasi dibuka lagi di lain hari, semua objek yang pernah Anda simpan otomatis dipulihkan kembali ke posisinya!
+
+### B. Perintah Pengelolaan Objek Tersimpan:
+* **`"List saved"`** : Menyebutkan semua label objek yang sedang tersimpan di ruangan.
+* **`"Clear saved"`** : Menghapus seluruh data anchor objek dari memori dan file disk.
+* **`"Find [nama]"`** : Mengaktifkan Spatial Audio Beacon untuk menuntun kepala pengguna ke objek tersebut.
+* **`"Navigate to [tujuan]"`** : Memandu rute jalan setapak demi setapak ke tujuan.
+
+### C. Deteksi Rintangan Cerdas & Anti-Spam
+Modul [`ObstacleDetector.cs`](file:///Users/lanaginting/Documents/by-your-sight/ByYourSight/Assets/Scripts/Safety/ObstacleDetector.cs) dilengkapi mekanisme perlindungan anti-overstimulation:
+* **Threshold Jarak:** Peringatan pada jarak **1.1m**, Alarm Bahaya Kritis P0 pada jarak **0.45m**.
+* **Kecepatan Pendekatan:** Alarm hanya aktif jika pengguna bergerak maju (≥ `0.25 m/s` untuk peringatan umum, ≥ `0.15 m/s` untuk kritis). Berdiri diam atau menoleh di dekat meja tidak memicu alarm palsu.
+* **Filter Tangan/Orang Sendiri:** Kategori `Person` dikecualikan dari rintangan rute (orang dikelola terpisah di KF08) sehingga tangan pengguna yang terdeteksi kamera tidak memicu alarm rintangan.
+* **Cooldown Cerdas:** Cooldown rintangan sejenis selama 12 detik, rintangan posisi sama selama 20 detik, dan cooldown global minimum 4.0 detik.
+
+---
+
+## 8. Kosakata Lengkap Perintah Suara (Voice Commands)
+
+Daftar perintah suara *offline* (Bahasa Inggris native HoloLens 2 via Windows KeywordRecognizer):
+
+| Perintah Suara (Speech) | Pintasan Keyboard | Kebutuhan Fungsional | Contoh Respon Audio Sistem |
 | :--- | :---: | :--- | :--- |
-| **"What is this?"** / **"Identify"** | `1` | KF01 (Identifikasi Objek) | *"Water bottle, 1.5 meters, ahead"* |
-| **"Save object [label]"** | `2` | KF02 (Simpan Benda) | *"Saved, House Keys"* |
-| **"Find Water bottle"** | `3` | KF03 (Spatial Audio Beacon) | *"Water bottle, 2 meters, ahead. Turn your head"* |
-| **"Find Coffee mug"** | `4` | KF03 (Spatial Audio Beacon) | *"Coffee mug, 2.5 meters, slightly right. Turn your head"* |
-| **"Navigate to Door"** / **"Take me to the door"** | `5` | KF05 (Navigasi Waypoint) | *"Navigating to Door"* → *"Go straight, 3 meters"* |
-| **"Navigate to Desk"** / **"Take me to the desk"** | `6` | KF05 (Navigasi Waypoint) | *"Navigating to Desk"* → *"Bear right, 2 meters"* |
-| **"Repeat"** | `7` | Prinsip Desain T3 | Mengulangi kalimat singkat terakhir. |
-| **"Details"** | `8` | Prinsip Desain T3 | Membacakan deskripsi detail objek terakhir. |
-| **"Cancel"** / **"Stop"** | `9` | Kontrol Navigasi/Beacon | *"Guidance cancelled"* |
-| **"Mute"** / **"Quiet"** / **"Resume"** | `M` | KF06 (Kontrol Audio Cepat) | Membisukan P1–P3 (P0 tetap aktif) / *"Audio resumed"* |
+| **"What is this?"** / **"Identify"** | `1` | KF01: Identifikasi Objek | *"Water bottle, 1.5 meters, ahead"* |
+| **"Save object [label]"** / **"Save [label]"** | `2` | KF02: Simpan Benda Permanen | *"Saved, Shelf"* (tersimpan ke disk) |
+| **"Find Water bottle"** | `3` | KF03: Spatial Audio Beacon | *"Water bottle, 2 meters, ahead. Turn your head"* |
+| **"Find Coffee mug"** | `4` | KF03: Spatial Audio Beacon | *"Coffee mug, 2.5 meters, slightly right"* |
+| **"Find Shelf"** / **"Find [item]"** | — | KF03: Cari Objek Tersimpan | Mengaktifkan nada ketukan 3D audio beacon |
+| **"Navigate to Door"** | `5` | KF05: Navigasi Waypoint | *"Navigating to Door"* → *"Go straight, 3 meters"* |
+| **"Navigate to Desk"** | `6` | KF05: Navigasi Waypoint | *"Navigating to Desk"* → *"Bear right, 2 meters"* |
+| **"List saved"** | — | Pengelolaan Anchor | *"Saved: shelf, door, trash bin"* |
+| **"Clear saved"** | — | Pengelolaan Anchor | *"All saved items cleared"* |
+| **"Repeat"** | `7` | Kontrol Audio | Mengulangi kalimat informasi terakhir |
+| **"Details"** | `8` | Kontrol Audio | Menyebutkan deskripsi lengkap objek |
+| **"Cancel"** / **"Stop"** | `9` | Kontrol Navigasi | *"Guidance cancelled"* |
+| **"Mute"** / **"Resume"** | `M` | KF06: Kontrol Mute Cepat | Membisukan P1–P3 (P0 tetap aktif) / *"Audio resumed"* |
 | **"Help"** | — | Panduan Pengguna | *"Say: What is this, Find item, Navigate to door, or Mute"* |
 
 ---
 
-## 7. Cara Menjalankan & Menguji di Unity Editor
+## 9. Struktur Kode & Pemetaan Modul (KF01–KF08)
 
-1. Buka folder `ByYourSight` menggunakan **Unity Hub** (Unity versi **2022.3 LTS**).
-2. Buka scene `Assets/Scenes/SampleScene.unity`.
-3. **Setup Ruangan Otomatis:**
-   - Begitu Unity selesai melakukan *compile*, scene akan **otomatis terisi** dengan `ByYourSight_PrototypeEnvironment` dan `ByYourSight_CoreSystem`.
-   - Jika ingin me-*reset* ulang ruangan kapan saja, cukup **Klik Kanan** pada panel **Hierarchy** (di sebelah kiri layar Unity) lalu pilih **`By Your Sight - Setup Prototype Scene`**.
-4. Klik tombol **Play (▶)** di bagian tengah atas Unity Editor, lalu ikuti langkah pengujian berikut:
-   - **Berjalan di Ruangan:** Gunakan tombol **`W` `A` `S` `D`**.
-   - **Memutar Pandangan Kepala (*Head Gaze*):** Tekan tombol **`Q` / `E`** atau tahan **Klik Kanan Mouse** sambil menggeser *mouse*. Arahkan tanda **`+` kuning** di tengah layar ke objek.
-   - **Menguji Fitur KF01–KF08:** Klik tombol pada panel **By Your Sight — HoloLens Native (EN)** di pojok kiri layar *Game* (atau tekan tombol angka **`1`–`9`** dan **`M`** di keyboard).
+Semua kode sumber utama berada di dalam folder `Assets/Scripts/`:
+
+```
+Assets/Scripts/
+├── Audio/
+│   └── PriorityAudioManager.cs       # Gerbang antrian P0-P3, sintesis earcon, native TTS
+├── Input/
+│   └── VoiceAndGestureController.cs  # Parser KeywordRecognizer, kontrol gestur, simulator HUD
+├── Navigation/
+│   └── SpatialBeaconAndNavigator.cs  # Audio Beacon 15° (KF03) & Rute Waypoint (KF05)
+├── Perception/
+│   ├── ObjectRecognizer.cs          # Gaze identification (KF01), persistent saving (KF02), social info (KF08)
+│   ├── RealWorldObjectDetector.cs   # Client penerima deteksi YOLO dari server laptop
+│   ├── TrackableObject.cs           # Metadata objek & visual bounding box kontras tinggi
+│   └── SurfaceClassifier.cs         # Klasifikasi permukaan Spatial Mesh (Floor, Wall, Ceiling)
+├── Safety/
+│   └── ObstacleDetector.cs          # Sensor bahaya rintangan 150ms latensi (KF07)
+└── Editor/
+    └── ByYourSightSceneSetup.cs     # Otomasi pengaturan scene prototipe dalam satu klik
+```
+
+---
+
+## 10. Troubleshooting & Solusi Masalah Umum
+
+| Masalah | Kemungkinan Penyebab | Solusi |
+| :--- | :--- | :--- |
+| **`cannot open camera stream`** di terminal Python | IP, username, atau password Device Portal salah, atau Device Portal belum diaktifkan di HoloLens. | Buka `https://<IP-HoloLens>` di browser laptop untuk memastikan autentikasi dan stream kamera berfungsi di menu *Views > Mixed Reality Capture*. |
+| **Camera AI: OFF** di layar Unity | Server Python belum dijalankan. | Buka terminal dan jalankan `python detection_server.py --source 0` (webcam) atau dengan parameter `--portal`. |
+| **Kotak hologram bergeser saat kepala menoleh** | Perbedaan latensi stream video jaringan Wi-Fi. | Atur nilai **`Stream Latency Seconds`** di Inspector `RealWorldObjectDetector` (naikkan jika tertinggal, turunkan jika mendahului, default: `0.8`–`1.2` detik). |
+| **"Find [item]" menjawab *"not saved yet"*** | Objek belum pernah disimpan dengan perintah *"Save object [item]"*. | Tatap objek tersebut lalu katakan *"Save object [nama]"* atau simpan melalui panel HUD. |
+| **Suara perintah suara tidak merespon di HoloLens** | Bahasa sistem bukan English (US) atau izin Microphone belum aktif. | Di HoloLens: ubah **Settings > Time & Language > Speech** ke **English (United States)**, dan pastikan capability *Microphone* dicentang di Player Settings. |
+| **Objek rak terbaca kulkas (*refrigerator*)** | Dataset standar COCO tidak memiliki kelas `shelf`. | Fitur auto-remapping sudah terpasang di `detection_server.py` dan `RealWorldObjectDetector.cs`. Jalankan server dengan versi terbaru. |
+| **Preview webcam terasa lambat (FPS rendah)** | Penggunaan model berat atau inferensi CPU. | Model default sudah menggunakan `yolo11s.pt`. Jika laptop memiliki kartu grafis NVIDIA, tambahkan opsi `--device 0`. |

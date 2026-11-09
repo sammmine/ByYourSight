@@ -106,14 +106,17 @@ namespace ByYourSight.Perception
             { "potted plant", "plant" },
             { "keys", "house keys" },
             { "box", "small box" },
-            { "trash can", "trash bin" }
+            { "trash can", "trash bin" },
+            { "refrigerator", "shelf" },
+            { "fridge", "shelf" },
+            { "rack", "shelf" }
         };
 
         // Objects that are dangerous to walk into (KF07). Everything else is an everyday object (KF01).
         private static readonly HashSet<string> HazardLabels = new HashSet<string>
         {
             "chair", "table", "desk", "sofa", "bed", "bench", "toilet", "plant", "bicycle", "motorcycle",
-            "refrigerator", "cabinet", "stairs", "door", "pillar", "trash bin", "bag", "fire hydrant", "stop sign",
+            "refrigerator", "shelf", "rack", "cabinet", "stairs", "door", "pillar", "trash bin", "bag", "fire hydrant", "stop sign",
             "car", "parking meter"
         };
 
@@ -244,6 +247,7 @@ namespace ByYourSight.Perception
                 Vector3 localDir = new Vector3((d.cx - 0.5f) * 2f * tanH, -(aimY - 0.5f) * 2f * tanV, 1f);
                 Vector3 worldDir = (camRot * localDir).normalized;
 
+                bool isHazard = HazardLabels.Contains(label);
                 bool hasSurface = RaycastRealSurface(pose.position, worldDir, maxDetectionDistance, out RaycastHit hit);
                 float distance;
                 if (isPerson)
@@ -255,6 +259,24 @@ namespace ByYourSight.Perception
                     if (cutOff) estimate = Mathf.Min(estimate, 1.2f); // body cut off by the frame = very close
                     distance = Mathf.Clamp(estimate, 0.5f, maxDetectionDistance);
                     if (hasSurface && hit.distance < distance) distance = hit.distance;
+                }
+                else if (!isHazard)
+                {
+                    // Small everyday objects (phone, water bottle, mug, etc.) may be held in hand in mid-air
+                    // where the Spatial Mesh only sees the distant wall behind them (or no surface at all).
+                    float handheldEstimate = 0.24f / Mathf.Max(0.04f, d.h * 2f * tanV);
+                    if (!hasSurface)
+                    {
+                        distance = Mathf.Clamp(handheldEstimate, 0.5f, 2.5f);
+                    }
+                    else if (d.h >= 0.16f && hit.distance > handheldEstimate + 0.5f)
+                    {
+                        distance = Mathf.Clamp(handheldEstimate, 0.5f, hit.distance);
+                    }
+                    else
+                    {
+                        distance = hit.distance;
+                    }
                 }
                 else
                 {

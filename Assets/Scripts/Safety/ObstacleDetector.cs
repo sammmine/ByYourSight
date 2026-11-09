@@ -16,25 +16,29 @@ namespace ByYourSight.Safety
     public class ObstacleDetector : MonoBehaviour
     {
         [Header("Hazard Detection Settings (KF07)")]
-        [Tooltip("Hazard warning distance threshold: 1.5m (150 cm per M2/T3 Acceptance Criteria)")]
-        public float hazardWarningDistance = 1.5f;
+        [Tooltip("Hazard warning distance threshold: 1.1m (reduced from 1.5m to avoid premature alerts)")]
+        public float hazardWarningDistance = 1.1f;
 
-        [Tooltip("Below this distance the P0 alarm with double-beep always plays")]
-        public float criticalDistance = 0.7f;
+        [Tooltip("Below this distance the P0 alarm with double-beep always plays (reduced from 0.7m to 0.45m)")]
+        public float criticalDistance = 0.45f;
 
         [Tooltip("SphereCast sweep radius ahead of the user")]
-        public float detectionRadius = 0.25f;
+        public float detectionRadius = 0.18f;
 
         [Tooltip("Check interval: 0.15s / 150ms (T3 latency target < 300ms)")]
         public float checkIntervalSeconds = 0.15f;
 
         [Header("Anti-Overstimulation")]
         [Tooltip("Walking speed toward the obstacle (m/s) needed before a non-critical notice is spoken")]
-        public float minApproachSpeed = 0.2f;
+        public float minApproachSpeed = 0.25f;
+        [Tooltip("Walking speed toward the obstacle (m/s) needed before a critical alarm is triggered")]
+        public float minCriticalApproachSpeed = 0.15f;
+        [Tooltip("Minimum quiet cooldown between any hazard announcements")]
+        public float minAnyWarningCooldown = 4.0f;
         [Tooltip("Same obstacle type is not announced again within this time unless it becomes critical")]
-        public float sameTypeRepeatSeconds = 5f;
-        [Tooltip("The exact same obstacle is not announced again within this time unless it becomes critical")]
-        public float sameObstacleRepeatSeconds = 10f;
+        public float sameTypeRepeatSeconds = 12f;
+        [Tooltip("The exact same obstacle location is not announced again within this time unless it becomes critical")]
+        public float sameObstacleRepeatSeconds = 20f;
 
         [Header("Current Obstacle Status (Read-Only)")]
         public bool isHazardDetected = false;
@@ -167,14 +171,21 @@ namespace ByYourSight.Safety
             bool walkingToward = approachSpeed >= minApproachSpeed;
             bool isPerson = trackable != null && trackable.category == SemanticObjectCategory.Person;
 
-            // Standing still or turning the head near a wall/desk stays silent. Critical range only needs a slow step
-            // toward it. People farther than critical are KF08's job (P2 "Person approaching").
+            // People are handled separately by KF08 (Social Info P2 "Person approaching").
+            // Also ignore user's own hands/arms detected as person.
+            if (isPerson)
+            {
+                return;
+            }
+
+            // Standing still or turning the head near a wall/desk stays silent.
+            // Critical range requires a deliberate step forward (minCriticalApproachSpeed).
             if (critical)
             {
-                if (approachSpeed < 0.05f)
+                if (approachSpeed < minCriticalApproachSpeed)
                     return;
             }
-            else if (!walkingToward || isPerson)
+            else if (!walkingToward)
             {
                 return;
             }
@@ -185,12 +196,13 @@ namespace ByYourSight.Safety
             int lastTier = sinceLast > sameObstacleRepeatSeconds ? 0 : _lastAnnouncedTier;
             bool escalates = tier > lastTier;
             bool sameType = label == _lastAnnouncedLabel;
-            bool sameObstacle = sameType && cell == _lastAnnouncedCell;
+            bool sameCell = cell == _lastAnnouncedCell;
+            bool isRepeat = (sameType && sinceLast < sameTypeRepeatSeconds) || (sameCell && sinceLast < sameObstacleRepeatSeconds);
 
             if (!escalates)
             {
-                if (sameObstacle && sinceLast < sameObstacleRepeatSeconds) return;
-                if (sameType && sinceLast < sameTypeRepeatSeconds) return;
+                if (isRepeat) return;
+                if (sinceLast < minAnyWarningCooldown) return;
             }
 
             if (!Announce(label, distance, hit.point, head, trackable, critical))
@@ -235,8 +247,8 @@ namespace ByYourSight.Safety
         }
 
         /// <summary>
-        /// Nearest hit that counts as a hazard: untagged real-world Spatial Mesh, a HazardObstacle or a Person.
-        /// Everyday objects (bottle, mug) and user-saved tags are skipped so they don't block the check.
+        /// Nearest hit that counts as a hazard: untagged real-world Spatial Mesh or a HazardObstacle (chair, desk, etc.).
+        /// Everyday objects, user-saved items, and people are skipped (people are monitored via KF08).
         /// </summary>
         private bool TryFindHazard(Ray ray, float maxDistance, Transform head, out RaycastHit best, out TrackableObject bestObj)
         {
@@ -250,6 +262,7 @@ namespace ByYourSight.Safety
                 if (h.distance <= 0f || h.distance >= bestDist) continue; // distance 0 = overlap at origin
                 TrackableObject t = h.collider.GetComponentInParent<TrackableObject>();
                 if (t != null && t.category == SemanticObjectCategory.EverydayObject) continue;
+                if (t != null && t.category == SemanticObjectCategory.Person) continue; // Skip Person; KF08 handles social info
                 if (t == null && SurfaceClassifier.Describe(h, head) == SurfaceClassifier.Floor) continue;
 
                 best = h;

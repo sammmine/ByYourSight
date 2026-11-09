@@ -143,10 +143,10 @@ namespace ByYourSight.Audio
             // P0 (Danger Alarm) interrupts all other audio and plays immediately
             if (priority == AudioPriority.P0_DangerAlarm)
             {
-                // Brief 2.2s cooldown so P0 alarms don't stack every frame.
+                // Cooldown so P0 alarms don't stack every frame and speech can finish.
                 // A critical alarm (with earcon) may still escalate right after a calm hazard notice.
                 bool escalation = playAlarmEarcon && !_lastDangerHadEarcon;
-                if (Time.time - _lastDangerAlertTime < 2.2f && !escalation)
+                if (Time.time - _lastDangerAlertTime < 3.5f && !escalation)
                     return false;
 
                 _lastDangerAlertTime = Time.time;

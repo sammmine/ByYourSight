@@ -53,6 +53,7 @@ namespace ByYourSight.InputSystem
             "Save object",
             "Save item",
             "List saved",
+            "Clear saved",
             "Repeat",
             "Details",
             "Mute",
@@ -70,7 +71,7 @@ namespace ByYourSight.InputSystem
                  "\"Save X\", \"Find X\", \"Navigate to X\" and \"Take me to the X\" (KeywordRecognizer needs fixed phrases).")]
         public List<string> realWorldTagLabels = new List<string>
         {
-            "door", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
+            "door", "shelf", "rack", "trash bin", "fire hydrant", "desk", "chair", "table", "window", "sofa", "bed", "cabinet",
             "sink", "stairs", "exit", "bag", "phone", "water bottle", "coffee mug",
             "house keys", "small box"
         };
@@ -80,7 +81,7 @@ namespace ByYourSight.InputSystem
         private static readonly string[] CameraDetectableLabels =
         {
             "person", "chair", "table", "sofa", "bed", "toilet", "laptop", "book", "television", "plant",
-            "bag", "phone", "water bottle", "coffee mug", "trash bin", "door", "stairs"
+            "bag", "phone", "water bottle", "coffee mug", "trash bin", "door", "stairs", "shelf", "rack"
         };
 
         private string[] BuildVoiceVocabulary()
@@ -237,6 +238,17 @@ namespace ByYourSight.InputSystem
                 List<string> saved = objectRecognizer != null ? objectRecognizer.GetSavedLabels() : new List<string>();
                 PriorityAudioManager.Instance.EnqueueSpeech(
                     saved.Count == 0 ? "Nothing saved yet" : "Saved: " + string.Join(", ", saved),
+                    AudioPriority.P3_ObjectIdentity
+                );
+                return;
+            }
+
+            // "Clear saved": deletes all persisted room anchors from memory and disk
+            if (cmd == "clear saved" || cmd == "delete saved")
+            {
+                objectRecognizer?.ClearSavedAnchors();
+                PriorityAudioManager.Instance.EnqueueSpeech(
+                    "All saved items cleared",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;

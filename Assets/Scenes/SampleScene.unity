@@ -1434,8 +1434,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 161316bbd8fad4203b46d0f34958c9d6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  hazardWarningDistance: 1.6
-  detectionRadius: 0.25
+  hazardWarningDistance: 1.1
+  criticalDistance: 0.45
+  detectionRadius: 0.18
   checkIntervalSeconds: 0.15
   isHazardDetected: 0
   currentHazardName: 
