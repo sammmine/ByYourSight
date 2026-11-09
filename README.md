@@ -329,3 +329,11 @@ Assets/Scripts/
 | **Logat suara TTS di Windows terdengar seperti aksen Inggris** | Paket suara *Text-to-speech* Bahasa Indonesia (*Microsoft Andika*) belum diinstal di Windows. | Buka **Windows Settings > Time & Language > Language & Region > Add a language > Bahasa Indonesia** dan centang *Text-to-speech*. |
 | **Objek rak terbaca kulkas (*refrigerator*)** | Dataset standar COCO tidak memiliki kelas `shelf`. | Fitur auto-remapping sudah terpasang di `detection_server.py` (`refrigerator -> shelf`) dan diterjemahkan menjadi **`Rak`** di Unity. |
 | **Preview webcam terasa lambat (FPS rendah)** | Penggunaan model berat atau inferensi CPU. | Model default sudah menggunakan `yolo11s.pt`. Jika laptop memiliki kartu grafis NVIDIA, tambahkan opsi `--device 0`. |
+
+py -0p
+py -3.11 -m venv .venv-py311
+.\.venv-py311\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -c "import sys, torch, cv2, numpy; print(sys.version); print('torch', torch.__version__, 'opencv', cv2.__version__, 'numpy', numpy.__version__)"
+python detection_server.py --source 0
