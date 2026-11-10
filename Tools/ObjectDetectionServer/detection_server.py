@@ -192,6 +192,10 @@ def make_handler(shared):
 
         def do_GET(self):
             path = self.path.split("?")[0]
+            # The server listens on the network for HoloLens builds, but camera images stay on this laptop
+            if path != "/detections" and self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(403, b"preview is only available on this laptop", "text/plain")
+                return
             if path == "/detections":
                 with shared.lock:
                     payload = dict(shared.result)

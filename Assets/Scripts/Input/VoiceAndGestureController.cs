@@ -235,7 +235,7 @@ namespace ByYourSight.InputSystem
                 _keywordRecognizer = new KeywordRecognizer(BuildVoiceVocabulary(), ConfidenceLevel.Low);
                 _keywordRecognizer.OnPhraseRecognized += args =>
                 {
-                    ProcessVoiceCommand(args.text, fromMicrophone: true);
+                    ProcessVoiceCommand(args.text, fromMicrophone: true, mayBeMisheard: args.confidence == ConfidenceLevel.Low);
                 };
                 _keywordRecognizer.Start();
                 Debug.Log("[Voice] Native HoloLens KeywordRecognizer started (Bilingual Indonesian Phonetic + English).");
@@ -270,7 +270,11 @@ namespace ByYourSight.InputSystem
         /// KF04: Main parser for processing Bahasa Indonesia (including phonetic spellings) & English voice commands
         /// (both from HoloLens native offline KeywordRecognizer and Editor simulation buttons).
         /// </summary>
-        public void ProcessVoiceCommand(string rawCommand, bool fromMicrophone = false)
+        /// <param name="mayBeMisheard">
+        /// True for low-confidence speech. The en-US recognizer can hear Indonesian "ini apa" as "cari ..." or "list saved",
+        /// so only these commands may fall back to identifying what the camera sees.
+        /// </param>
+        public void ProcessVoiceCommand(string rawCommand, bool fromMicrophone = false, bool mayBeMisheard = false)
         {
             if (string.IsNullOrWhiteSpace(rawCommand) || PriorityAudioManager.Instance == null)
                 return;
@@ -282,7 +286,7 @@ namespace ByYourSight.InputSystem
                 cmd = canonical;
             }
 
-            Debug.Log($"[Voice] Recognized: \"{rawCommand}\" -> \"{cmd}\" (fromMic={fromMicrophone})");
+            Debug.Log($"[Voice] Recognized: \"{rawCommand}\" -> \"{cmd}\" (fromMic={fromMicrophone}, mayBeMisheard={mayBeMisheard})");
             PriorityAudioManager.Instance.PlayEarcon(EarconType.ListeningStart);
 
             // 1. "Diam" / "Mute" (KF06)
@@ -323,7 +327,7 @@ namespace ByYourSight.InputSystem
             // "Daftar simpanan" / "List saved"
             if (cmd == "daftar simpanan" || cmd == "list saved")
             {
-                if (fromMicrophone && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
+                if (mayBeMisheard && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
                 {
                     objectRecognizer.IdentifyObjectInGaze();
                     return;
@@ -385,7 +389,7 @@ namespace ByYourSight.InputSystem
                 {
                     navigator.StartBeaconForObject(found);
                 }
-                else if (fromMicrophone && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
+                else if (mayBeMisheard && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
                 {
                     // Windows en-US KeywordRecognizer often misrecognizes spoken Indonesian "ini apa" as "cari [item]".
                     // If the target item wasn't saved and the user is pointing the camera at a live detected object,
@@ -414,7 +418,7 @@ namespace ByYourSight.InputSystem
                 else if (cmd.StartsWith("navigate to ")) dest = trimmed.Substring(12).Trim();
                 else dest = trimmed.Substring(11).Replace("the ", "").Trim();
 
-                navigator?.StartNavigationTo(dest, fromMicrophone);
+                navigator?.StartNavigationTo(dest, mayBeMisheard);
                 return;
             }
 

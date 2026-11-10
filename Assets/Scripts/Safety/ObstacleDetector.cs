@@ -40,6 +40,9 @@ namespace ByYourSight.Safety
         [Tooltip("The exact same obstacle location is not announced again within this time unless it becomes critical")]
         public float sameObstacleRepeatSeconds = 20f;
 
+        [Tooltip("A critical alarm for the same spot repeats after this long while the user keeps walking toward it")]
+        public float criticalRepeatSeconds = 3.5f;
+
         [Header("Current Obstacle Status (Read-Only)")]
         public bool isHazardDetected = false;
         public string currentHazardName = "";
@@ -201,8 +204,16 @@ namespace ByYourSight.Safety
 
             if (!escalates)
             {
-                if (isRepeat) return;
-                if (sinceLast < minAnyWarningCooldown) return;
+                if (critical)
+                {
+                    // A critical alarm is only held back for the exact same spot, never for another obstacle
+                    if (sameCell && sinceLast < criticalRepeatSeconds) return;
+                }
+                else
+                {
+                    if (isRepeat) return;
+                    if (sinceLast < minAnyWarningCooldown) return;
+                }
             }
 
             if (!Announce(label, distance, hit.point, head, trackable, critical))

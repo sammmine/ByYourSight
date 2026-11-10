@@ -150,12 +150,12 @@ python detection_server.py --source 0
 
 **Opsi B — Menggunakan Kamera HoloLens 2 via Wi-Fi:**
 ```bash
-python detection_server.py --portal https://<IP-HoloLens> --user byyoursight --password hololens
+python detection_server.py --portal https://<IP-HoloLens> --user <USERNAME> --password <PASSWORD>
 ```
 
 **Opsi C — Menggunakan Kamera HoloLens 2 via Kabel USB-C:**
 ```bash
-python detection_server.py --portal http://127.0.0.1:10080 --user byyoursight --password hololens
+python detection_server.py --portal http://127.0.0.1:10080 --user <USERNAME> --password <PASSWORD>
 ```
 
 ### Langkah 4: Membuka Web Preview

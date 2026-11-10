@@ -341,7 +341,7 @@ namespace ByYourSight.Perception
             float bestAngleScore = float.MaxValue;
             foreach (TrackableObject t in allObjects)
             {
-                if (t == null || t.category == SemanticObjectCategory.Person)
+                if (t == null || t.category == SemanticObjectCategory.Person || string.IsNullOrEmpty(t.labelName))
                     continue;
 
                 Vector3 toObj = t.transform.position - head.position;
@@ -639,6 +639,9 @@ namespace ByYourSight.Perception
             }
 
             TrackableObject t = boxObj.AddComponent<TrackableObject>();
+            // An empty label keeps this visual-only box out of "Ini apa" and "Cari"
+            t.labelName = "";
+            t.detailedDescription = "";
             t.TriggerVisualHighlight(color, duration);
             Destroy(boxObj, duration + 0.1f);
         }

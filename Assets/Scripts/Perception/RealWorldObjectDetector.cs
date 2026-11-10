@@ -44,7 +44,7 @@ namespace ByYourSight.Perception
         public int missesBeforeRemoval = 8;
 
         [Header("People (KF08) & \"Ada apa saja?\" Summary")]
-        [Tooltip("People and summary items below this confidence are not announced")]
+        [Tooltip("People below this confidence are not tracked or announced as nearby. \"Ada apa saja?\" uses minConfidence so it matches the camera preview.")]
         [Range(0f, 1f)] public float announceMinConfidence = 0.35f;
         [Tooltip("Used when the top or bottom of a person is outside the frame")]
         public float personShoulderWidthMeters = 0.5f;
@@ -52,6 +52,8 @@ namespace ByYourSight.Perception
         [Range(0f, 1f)] public float ownHandMinTopEdge = 0.65f;
         [Tooltip("\"Ada apa saja?\" only uses a camera frame newer than this")]
         public float maxSummaryFrameAgeSeconds = 3f;
+        [Tooltip("YOLO flickers between frames, so \"Ada apa saja?\" uses the fullest frame received within this time")]
+        public float summaryLookbackSeconds = 2f;
         [Tooltip("Items this close to the frame center count as \"di depan\"")]
         [Range(0.05f, 0.5f)] public float summaryCenterHalfWidth = 0.17f;
         [Tooltip("Maximum label-and-direction groups spoken at once. \"Detail\" reads the full list.")]
@@ -233,6 +235,7 @@ namespace ByYourSight.Perception
 
         private readonly List<HeadPose> _poseHistory = new List<HeadPose>();
         private readonly List<TrackedDetection> _tracked = new List<TrackedDetection>();
+        private readonly List<KeyValuePair<float, DetectionResponse>> _recentResponses = new List<KeyValuePair<float, DetectionResponse>>();
         private DetectionResponse _latestResponse;
         private float _latestResponseWallTime = -100f;
         private bool _warnedOffline = false;
@@ -504,6 +507,12 @@ namespace ByYourSight.Perception
                 return;
             }
 
+            if (!ReferenceEquals(resp, _latestResponse))
+            {
+                _recentResponses.Add(new KeyValuePair<float, DetectionResponse>(requestTime, resp));
+                _recentResponses.RemoveAll(r => requestTime - r.Key > summaryLookbackSeconds);
+            }
+
             _latestResponse = resp;
             _latestResponseWallTime = requestTime;
 
@@ -692,17 +701,46 @@ namespace ByYourSight.Perception
             shortSummary = "";
             fullSummary = "";
 
-            if (!enableDetection || !isServerConnected || _latestResponse == null || _latestResponse.detections == null)
+            if (!enableDetection || !isServerConnected)
                 return ViewSummaryStatus.CameraNotReady;
 
-            float frameAge = Mathf.Max(0f, Time.realtimeSinceStartup - _latestResponseWallTime) + Mathf.Max(0f, _latestResponse.age);
-            if (frameAge > maxSummaryFrameAgeSeconds)
-                return ViewSummaryStatus.CameraNotReady;
+            float now = Time.realtimeSinceStartup;
+            List<ViewItem> items = null;
+            int rawCount = 0;
 
-            List<ViewItem> items = new List<ViewItem>();
-            foreach (DetectionDto d in _latestResponse.detections)
+            // Oldest to newest, so the newest frame wins a tie
+            foreach (KeyValuePair<float, DetectionResponse> entry in _recentResponses)
             {
-                if (d == null || string.IsNullOrEmpty(d.label) || d.conf < announceMinConfidence)
+                DetectionResponse resp = entry.Value;
+                float sinceReceived = Mathf.Max(0f, now - entry.Key);
+                if (resp == null || resp.detections == null || sinceReceived > summaryLookbackSeconds ||
+                    sinceReceived + Mathf.Max(0f, resp.age) > maxSummaryFrameAgeSeconds)
+                    continue;
+
+                List<ViewItem> candidate = CollectSummaryItems(resp.detections);
+                if (items == null || candidate.Count >= items.Count)
+                {
+                    items = candidate;
+                    rawCount = resp.detections.Length;
+                }
+            }
+
+            if (items == null)
+                return ViewSummaryStatus.CameraNotReady;
+
+            Debug.Log($"[Detection] Ada apa saja: {rawCount} deteksi dari server, {items.Count} dipakai (minConfidence={minConfidence:0.00})");
+
+            return ViewSummaryBuilder.TryBuild(items, summaryCenterHalfWidth, summaryMaxGroups, out shortSummary, out fullSummary)
+                ? ViewSummaryStatus.Ok
+                : ViewSummaryStatus.NothingDetected;
+        }
+
+        private List<ViewItem> CollectSummaryItems(DetectionDto[] detections)
+        {
+            List<ViewItem> items = new List<ViewItem>();
+            foreach (DetectionDto d in detections)
+            {
+                if (d == null || string.IsNullOrEmpty(d.label) || d.conf < minConfidence)
                     continue;
 
                 string label = MapLabel(d.label);
@@ -712,10 +750,7 @@ namespace ByYourSight.Perception
 
                 items.Add(new ViewItem { Label = label, IsPerson = isPerson, CenterX = d.cx, Confidence = d.conf });
             }
-
-            return ViewSummaryBuilder.TryBuild(items, summaryCenterHalfWidth, summaryMaxGroups, out shortSummary, out fullSummary)
-                ? ViewSummaryStatus.Ok
-                : ViewSummaryStatus.NothingDetected;
+            return items;
         }
 
         /// <summary>

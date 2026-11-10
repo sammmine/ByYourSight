@@ -87,7 +87,7 @@ namespace ByYourSight.Navigation
         /// <summary>
         /// KF05: Starts waypoint route navigation toward a destination ("Antar ke [tujuan]" / "Navigate to [destination]").
         /// </summary>
-        public void StartNavigationTo(string queryDestination, bool fromMicrophone = false)
+        public void StartNavigationTo(string queryDestination, bool mayBeMisheard = false)
         {
             if (PriorityAudioManager.Instance == null)
                 return;
@@ -125,7 +125,7 @@ namespace ByYourSight.Navigation
 
             if (route == null)
             {
-                if (fromMicrophone && recognizer != null && recognizer.HasActiveCameraObjectInView())
+                if (mayBeMisheard && recognizer != null && recognizer.HasActiveCameraObjectInView())
                 {
                     recognizer.IdentifyObjectInGaze();
                     return;

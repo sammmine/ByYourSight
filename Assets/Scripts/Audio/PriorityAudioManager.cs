@@ -151,7 +151,8 @@ namespace ByYourSight.Audio
                 // Cooldown so P0 alarms don't stack every frame and speech can finish.
                 // A critical alarm (with earcon) may still escalate right after a calm hazard notice.
                 bool escalation = playAlarmEarcon && !_lastDangerHadEarcon;
-                if (Time.time - _lastDangerAlertTime < 3.5f && !escalation)
+                float cooldown = playAlarmEarcon ? 1.5f : 3.5f; // critical alarms must not wait for the previous sentence
+                if (Time.time - _lastDangerAlertTime < cooldown && !escalation)
                     return false;
 
                 _lastDangerAlertTime = Time.time;
