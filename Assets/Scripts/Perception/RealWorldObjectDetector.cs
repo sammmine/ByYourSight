@@ -236,6 +236,7 @@ namespace ByYourSight.Perception
         private readonly List<HeadPose> _poseHistory = new List<HeadPose>();
         private readonly List<TrackedDetection> _tracked = new List<TrackedDetection>();
         private readonly List<KeyValuePair<float, DetectionResponse>> _recentResponses = new List<KeyValuePair<float, DetectionResponse>>();
+        private string _lastServerJson = "";
         private DetectionResponse _latestResponse;
         private float _latestResponseWallTime = -100f;
         private bool _warnedOffline = false;
@@ -328,7 +329,8 @@ namespace ByYourSight.Perception
                         DetectionResponse resp = null;
                         try
                         {
-                            resp = JsonUtility.FromJson<DetectionResponse>(req.downloadHandler.text);
+                            _lastServerJson = req.downloadHandler.text;
+                            resp = JsonUtility.FromJson<DetectionResponse>(_lastServerJson);
                         }
                         catch (Exception e)
                         {
@@ -342,8 +344,9 @@ namespace ByYourSight.Perception
                     {
                         isServerConnected = false;
 
-                        // If 127.0.0.1 failed (e.g. running as a standalone UWP build on HoloLens 2 while
-                        // detection_server.py is running on the Windows laptop), probe embedded laptop IPs!
+#if WINDOWS_UWP && !UNITY_EDITOR
+                        // Standalone UWP build on HoloLens 2: probe embedded laptop IPs and local subnet.
+                        // The Editor must stay on its own laptop, or it can attach to a teammate's server on the same Wi-Fi.
                         bool foundAlternative = false;
                         foreach (string altUrl in candidateUrls)
                         {
@@ -392,6 +395,15 @@ namespace ByYourSight.Perception
                             }
                             yield return new WaitForSeconds(3f);
                         }
+#else
+                        if (!_warnedOffline)
+                        {
+                            Debug.LogWarning($"[Detection] Detection server not reachable at {serverUrl} ({req.error}). " +
+                                             "Start Tools/ObjectDetectionServer/detection_server.py on this laptop. Retrying in 1 s.");
+                            _warnedOffline = true;
+                        }
+                        yield return new WaitForSeconds(1f);
+#endif
                     }
                 }
 
@@ -707,6 +719,8 @@ namespace ByYourSight.Perception
             float now = Time.realtimeSinceStartup;
             List<ViewItem> items = null;
             int rawCount = 0;
+            int frameCount = 0;
+            int maxRawCount = 0;
 
             // Oldest to newest, so the newest frame wins a tie
             foreach (KeyValuePair<float, DetectionResponse> entry in _recentResponses)
@@ -716,6 +730,9 @@ namespace ByYourSight.Perception
                 if (resp == null || resp.detections == null || sinceReceived > summaryLookbackSeconds ||
                     sinceReceived + Mathf.Max(0f, resp.age) > maxSummaryFrameAgeSeconds)
                     continue;
+
+                frameCount++;
+                maxRawCount = Mathf.Max(maxRawCount, resp.detections.Length);
 
                 List<ViewItem> candidate = CollectSummaryItems(resp.detections);
                 if (items == null || candidate.Count >= items.Count)
@@ -728,7 +745,13 @@ namespace ByYourSight.Perception
             if (items == null)
                 return ViewSummaryStatus.CameraNotReady;
 
-            Debug.Log($"[Detection] Ada apa saja: {rawCount} deteksi dari server, {items.Count} dipakai (minConfidence={minConfidence:0.00})");
+            Debug.Log($"[Detection] Ada apa saja: {rawCount} deteksi dari server, {items.Count} dipakai " +
+                      $"(minConfidence={minConfidence:0.00}, frame={frameCount}, terbanyak={maxRawCount}, url={serverUrl})");
+            if (items.Count == 0)
+            {
+                string sample = _lastServerJson.Length > 300 ? _lastServerJson.Substring(0, 300) : _lastServerJson;
+                Debug.Log($"[Detection] Respons terakhir server: {sample}");
+            }
 
             return ViewSummaryBuilder.TryBuild(items, summaryCenterHalfWidth, summaryMaxGroups, out shortSummary, out fullSummary)
                 ? ViewSummaryStatus.Ok
