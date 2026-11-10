@@ -163,7 +163,7 @@ def detect_frame(model, args, shared, frame, frame_time):
     ok, jpeg = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 70])
     with shared.lock:
         shared.result = {"width": w, "height": h, "detections": detections}
-        shared.result_frame_time = frame_time
+        shared.result_frame_time = time.time()
         shared.inference_ms = elapsed * 1000
         shared.inference_fps = 0.8 * shared.inference_fps + 0.2 * (1.0 / max(elapsed, 1e-3))
         if ok:

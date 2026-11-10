@@ -1,6 +1,8 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Networking;
 using ByYourSight.Audio;
 
 namespace ByYourSight.Perception
@@ -62,10 +64,16 @@ namespace ByYourSight.Perception
         /// <summary>
         /// KF01: Triggered when the user says "Ini apa?" / "What is this?"
         /// T3 output pattern: [Apa] + [Jarak] + [Arah], e.g., "Botol minum, 1 setengah meter, di depan"
+        /// Prioritizes live AI camera detections from detection_server.py (http://127.0.0.1:8765/detections)
+        /// so objects visible on the camera preview (laptop, cup, bottle, phone, etc.) are always announced first.
         /// </summary>
         public void IdentifyObjectInGaze()
         {
-            if (Camera.main == null || PriorityAudioManager.Instance == null)
+            if (PriorityAudioManager.Instance == null)
+                return;
+
+            Camera activeCam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+            if (activeCam == null)
                 return;
 
             if (simulateLowLightWarning)
@@ -78,38 +86,87 @@ namespace ByYourSight.Perception
                 return;
             }
 
-            Transform head = Camera.main.transform;
+            Transform head = activeCam.transform;
             Ray gazeRay = new Ray(head.position, head.forward);
 
+            RealWorldObjectDetector camDetector = FindObjectOfType<RealWorldObjectDetector>();
+            if (camDetector == null)
+                camDetector = gameObject.AddComponent<RealWorldObjectDetector>();
+
+            // 1. Highest Priority: Live AI Camera Detection from http://127.0.0.1:8765/detections
+            if (camDetector != null && camDetector.TryGetBestLiveDetection(
+                    head,
+                    out TrackableObject camTrackable,
+                    out string camObjName,
+                    out Vector3 camPoint,
+                    out float camDist,
+                    out string camDetail))
+            {
+                AnnounceIdentifiedObject(camObjName, camDist, camPoint, head, camTrackable, camDetail);
+                return;
+            }
+
+            // 2. If no live detection is cached yet, do an immediate on-demand check of the detection server
+            //    before falling back to scene/mesh raycast so camera preview objects are never missed.
+            StartCoroutine(IdentifyWithLiveServerCheckCoroutine(head, gazeRay, camDetector));
+        }
+
+        private IEnumerator IdentifyWithLiveServerCheckCoroutine(Transform head, Ray gazeRay, RealWorldObjectDetector camDetector)
+        {
+            if (camDetector != null && camDetector.enableDetection)
+            {
+                string primaryUrl = string.IsNullOrWhiteSpace(camDetector.serverUrl)
+                    ? "http://127.0.0.1:8765/detections"
+                    : camDetector.serverUrl.Trim();
+
+                float reqTime = Time.realtimeSinceStartup;
+                using (UnityWebRequest req = UnityWebRequest.Get(primaryUrl))
+                {
+                    req.timeout = 1;
+                    yield return req.SendWebRequest();
+                    if (req.result == UnityWebRequest.Result.Success)
+                    {
+                        camDetector.IngestRawDetectionJson(req.downloadHandler.text, reqTime);
+                    }
+                }
+
+                if (head != null && camDetector.TryGetBestLiveDetection(
+                        head,
+                        out TrackableObject camTrackable,
+                        out string camObjName,
+                        out Vector3 camPoint,
+                        out float camDist,
+                        out string camDetail))
+                {
+                    AnnounceIdentifiedObject(camObjName, camDist, camPoint, head, camTrackable, camDetail);
+                    yield break;
+                }
+            }
+
+            if (head != null)
+            {
+                ExecuteGazeRaycastIdentification(gazeRay, head);
+            }
+        }
+
+        private void ExecuteGazeRaycastIdentification(Ray gazeRay, Transform head)
+        {
             if (TryFindBestTargetInGaze(gazeRay, head, out RaycastHit hit, out TrackableObject trackable, out Vector3 targetPoint, out float rawDistance))
             {
-                string objName = trackable != null
-                    ? RealWorldObjectDetector.ToIndonesianLabel(trackable.labelName)
-                    : SurfaceClassifier.Describe(hit, head);
-                string distText = PriorityAudioManager.FormatDistance(rawDistance);
-                string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, targetPoint);
-
-                string shortMsg = $"{objName}, {distText}, {dirText}";
-                string detailMsg = trackable != null && !string.IsNullOrEmpty(trackable.detailedDescription)
-                    ? $"{objName}, {distText} {dirText}. {trackable.detailedDescription}"
-                    : $"{objName} terdeteksi pada jarak {distText} {dirText}";
-
+                string objName;
                 if (trackable != null)
                 {
-                    trackable.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.0f);
+                    objName = RealWorldObjectDetector.ToIndonesianLabel(trackable.labelName);
                 }
                 else
                 {
-                    SpawnTemporaryRealWorldHighlightBox(targetPoint, TrackableObject.HighContrastYellow, 3.0f);
+                    string surfaceDesc = SurfaceClassifier.Describe(hit, head);
+                    // On "Ini apa?", a horizontal surface at waist/desk height is a table/desk ("Meja"), not "Rintangan rendah"
+                    objName = surfaceDesc == SurfaceClassifier.LowObstacle ? "Meja" : surfaceDesc;
                 }
 
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, targetPoint);
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    shortMsg,
-                    AudioPriority.P3_ObjectIdentity,
-                    targetPoint,
-                    detailMsg
-                );
+                string detail = trackable != null ? trackable.detailedDescription : "";
+                AnnounceIdentifiedObject(objName, rawDistance, targetPoint, head, trackable, detail);
             }
             else
             {
@@ -119,6 +176,40 @@ namespace ByYourSight.Perception
                     AudioPriority.P3_ObjectIdentity
                 );
             }
+        }
+
+        private void AnnounceIdentifiedObject(
+            string objName,
+            float rawDistance,
+            Vector3 targetPoint,
+            Transform head,
+            TrackableObject trackable,
+            string customDetail)
+        {
+            string distText = PriorityAudioManager.FormatDistance(rawDistance);
+            string dirText = PriorityAudioManager.GetRelativeBodyDirection(head, targetPoint);
+
+            string shortMsg = $"{objName}, {distText}, {dirText}";
+            string detailMsg = !string.IsNullOrEmpty(customDetail)
+                ? $"{objName}, {distText} {dirText}. {customDetail}"
+                : $"{objName}, {distText}, {dirText}";
+
+            if (trackable != null)
+            {
+                trackable.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.0f);
+            }
+            else
+            {
+                SpawnTemporaryRealWorldHighlightBox(targetPoint, TrackableObject.HighContrastYellow, 3.0f);
+            }
+
+            PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, targetPoint);
+            PriorityAudioManager.Instance.EnqueueSpeech(
+                shortMsg,
+                AudioPriority.P3_ObjectIdentity,
+                targetPoint,
+                detailMsg
+            );
         }
 
         /// <summary>
@@ -223,7 +314,7 @@ namespace ByYourSight.Perception
             RealWorldObjectDetector camDetector = FindObjectOfType<RealWorldObjectDetector>();
             if (camDetector != null && camDetector.isServerConnected)
             {
-                TrackableObject camObj = camDetector.GetMostCentralActiveDetection(4.0f);
+                TrackableObject camObj = camDetector.GetMostCentralActiveDetection(10.0f);
                 if (camObj != null)
                 {
                     bestTrackable = camObj;
@@ -248,7 +339,7 @@ namespace ByYourSight.Perception
         public bool HasActiveCameraObjectInView()
         {
             RealWorldObjectDetector camDetector = FindObjectOfType<RealWorldObjectDetector>();
-            return camDetector != null && camDetector.isServerConnected && camDetector.GetMostCentralActiveDetection(4.0f) != null;
+            return camDetector != null && camDetector.isServerConnected && camDetector.GetMostCentralActiveDetection(10.0f) != null;
         }
 
         /// <summary>
