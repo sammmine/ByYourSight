@@ -22,8 +22,11 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Low-latency FFmpeg options must be set before OpenCV opens the stream
-os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;low_delay")
+# Low-latency FFmpeg options + 3-second read/socket timeout so stream auto-reconnects when Holographic Remoting starts
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "fflags;nobuffer|flags;low_delay|timeout;3000000|rw_timeout;3000000|stimeout;3000000"
+)
 
 import cv2  # noqa: E402
 from ultralytics import YOLO  # noqa: E402
@@ -96,12 +99,23 @@ class Shared:
 def grab_frames(source, shared):
     """Reads the stream continuously so the newest frame is always available (no buffered lag)."""
     while not shared.stop.is_set():
-        cap = cv2.VideoCapture(source) if isinstance(source, int) else cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        if isinstance(source, int):
+            cap = cv2.VideoCapture(source)
+        else:
+            try:
+                cap = cv2.VideoCapture(
+                    source,
+                    cv2.CAP_FFMPEG,
+                    [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3500, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3500],
+                )
+            except Exception:
+                cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+
         if not cap.isOpened():
             with shared.lock:
                 shared.stream_status = "cannot open camera stream (check IP, Device Portal login, Wi-Fi)"
-            print("[stream] Cannot open", redact(source), "- retrying in 3 s")
-            time.sleep(3)
+            print("[stream] Cannot open", redact(source), "- retrying in 2 s")
+            time.sleep(2)
             continue
 
         print("[stream] Connected to", redact(source))
@@ -236,8 +250,8 @@ def main():
     ap.add_argument("--model", default="yolo11s.pt",
                     help="yolo11s.pt (accurate, 80 everyday classes), yolo11n.pt (faster), or yolov8s-worldv2.pt (also door/stairs)")
     ap.add_argument("--imgsz", type=int, default=640)
-    ap.add_argument("--conf", type=float, default=0.25,
-                    help="Confidence threshold (default 0.25 for better detection of books/smaller objects)")
+    ap.add_argument("--conf", type=float, default=0.15,
+                    help="Confidence threshold (default 0.15 for better detection of cups, TVs, books, and smaller objects)")
     ap.add_argument("--remap", default=None,
                     help="Label remapping, e.g. 'refrigerator:shelf' (default: refrigerator -> shelf)")
     ap.add_argument("--device", default=None, help="cpu, 0 for the first NVIDIA GPU (default: auto)")

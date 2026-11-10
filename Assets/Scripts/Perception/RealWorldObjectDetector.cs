@@ -22,7 +22,7 @@ namespace ByYourSight.Perception
         public bool enableDetection = true;
         public string serverUrl = "http://127.0.0.1:8765/detections";
         public float pollIntervalSeconds = 0.25f;
-        [Range(0f, 1f)] public float minConfidence = 0.25f;
+        [Range(0f, 1f)] public float minConfidence = 0.15f;
 
         [Header("HoloLens 2 PV Camera Projection")]
         [Tooltip("Horizontal field of view of the HoloLens 2 photo/video camera in the live stream")]
@@ -37,11 +37,11 @@ namespace ByYourSight.Perception
         public float mergeRadius = 0.7f;
         public float personMergeRadius = 1.2f;
         [Tooltip("People move, so their markers disappear quickly when no longer seen")]
-        public float personForgetSeconds = 2.5f;
+        public float personForgetSeconds = 4.0f;
         [Tooltip("Objects stay remembered this long after they were last seen, even when out of view")]
         public float objectForgetSeconds = 300f;
         [Tooltip("An object that should be in view but isn't detected this many times in a row is removed")]
-        public int missesBeforeRemoval = 8;
+        public int missesBeforeRemoval = 80;
 
         [Header("Status (Read-Only)")]
         public bool isServerConnected = false;
@@ -142,6 +142,10 @@ namespace ByYourSight.Perception
             { "tuss", "tas" },
             { "tv", "televisi" },
             { "television", "televisi" },
+            { "tvmonitor", "televisi" },
+            { "monitor", "televisi" },
+            { "screen", "televisi" },
+            { "display", "televisi" },
             { "televisi", "televisi" },
             { "potted plant", "tanaman" },
             { "plant", "tanaman" },
@@ -235,9 +239,14 @@ namespace ByYourSight.Perception
 
         private void OnEnable()
         {
-            // Ensure Unity accepts all detections shown on the http://127.0.0.1:8765 preview (server default conf = 0.25)
-            if (minConfidence > 0.25f)
-                minConfidence = 0.25f;
+            // Ensure Unity accepts low-confidence detections (cups, TVs, laptops on live_low stream)
+            if (minConfidence > 0.15f)
+                minConfidence = 0.15f;
+            if (missesBeforeRemoval < 60)
+                missesBeforeRemoval = 60;
+#if UNITY_EDITOR || UNITY_STANDALONE
+            serverUrl = "http://127.0.0.1:8765/detections";
+#endif
             StartCoroutine(PollLoop());
         }
 
@@ -298,7 +307,7 @@ namespace ByYourSight.Perception
                 float requestTime = Time.realtimeSinceStartup; // wall clock: editor hitches must not shift pose matching
                 using (UnityWebRequest req = UnityWebRequest.Get(serverUrl))
                 {
-                    req.timeout = 2;
+                    req.timeout = 4;
                     yield return req.SendWebRequest();
 
                     if (req.result == UnityWebRequest.Result.Success)
@@ -325,8 +334,8 @@ namespace ByYourSight.Perception
                     {
                         isServerConnected = false;
 
-                        // If 127.0.0.1 failed (e.g. running as a standalone UWP build on HoloLens 2 while
-                        // detection_server.py is running on the Windows laptop), probe embedded laptop IPs!
+#if WINDOWS_UWP && !UNITY_EDITOR
+                        // Standalone UWP build on HoloLens 2: probe embedded laptop IPs and local subnet
                         bool foundAlternative = false;
                         foreach (string altUrl in candidateUrls)
                         {
@@ -360,7 +369,6 @@ namespace ByYourSight.Perception
 
                         if (!foundAlternative)
                         {
-                            // Also scan the local /24 Wi-Fi subnet in parallel batches in case the laptop IP changed
                             yield return StartCoroutine(ScanLocalSubnetForServer());
                             foundAlternative = isServerConnected;
                         }
@@ -369,12 +377,20 @@ namespace ByYourSight.Perception
                         {
                             if (!_warnedOffline)
                             {
-                                Debug.LogWarning($"[Detection] Detection server not reachable at {serverUrl} ({req.error}). " +
-                                                 "Start Tools/ObjectDetectionServer/detection_server.py on this laptop. Retrying every 3 s.");
+                                Debug.LogWarning($"[Detection] Detection server not reachable at {serverUrl} ({req.error}). Retrying every 2 s.");
                                 _warnedOffline = true;
                             }
-                            yield return new WaitForSeconds(3f);
+                            yield return new WaitForSeconds(2f);
                         }
+#else
+                        if (!_warnedOffline)
+                        {
+                            Debug.LogWarning($"[Detection] Detection server not reachable at {serverUrl} ({req.error}). " +
+                                             "Start Tools/ObjectDetectionServer/detection_server.py on this laptop. Retrying in 1 s.");
+                            _warnedOffline = true;
+                        }
+                        yield return new WaitForSeconds(1.0f);
+#endif
                     }
                 }
 
@@ -483,8 +499,7 @@ namespace ByYourSight.Perception
             if (resp == null || resp.detections == null)
                 return;
 
-            // Allow up to 15s frame age so CPU-bound YOLO inference + Holographic Remoting never drops valid frames
-            if (resp.age > 15f)
+            if (resp.detections.Length == 0 && resp.age > 30f)
             {
                 lastDetectedLabels = "";
                 return;
@@ -504,8 +519,8 @@ namespace ByYourSight.Perception
                 });
             }
 
-            // Same frame as last poll (YOLO slower than polling): refresh lastSeen on active markers so they never expire
-            float frameStamp = requestTime - Mathf.Max(0f, resp.age);
+            float effectiveAge = Mathf.Clamp(resp.age, 0f, 2.0f);
+            float frameStamp = requestTime - effectiveAge;
             if (!forceProcess && Mathf.Abs(frameStamp - _lastFrameStamp) < 0.03f)
             {
                 foreach (DetectionDto d in resp.detections)
@@ -543,6 +558,10 @@ namespace ByYourSight.Perception
                 string label = MapLabel(d.label);
                 bool isPerson = label == "orang" || label == "person";
 
+                // Ignore user's own hand/arm near the bottom edge of the camera frame
+                if (isPerson && d.cy > 0.76f && d.h < 0.42f)
+                    continue;
+
                 // Pixel -> ray: aim at the lower-middle of the box for floor-standing things, the center otherwise
                 float aimY = isPerson ? d.cy : d.cy + d.h * 0.15f;
                 Vector3 localDir = new Vector3((d.cx - 0.5f) * 2f * tanH, -(aimY - 0.5f) * 2f * tanV, 1f);
@@ -553,24 +572,39 @@ namespace ByYourSight.Perception
                 float distance;
                 if (isPerson)
                 {
-                    // People are rarely in the Spatial Mesh (they move), so the ray would hit the wall behind them.
-                    // Estimate distance from box height, assuming a ~1.7 m tall person.
-                    float estimate = 1.7f / Mathf.Max(0.05f, d.h * 2f * tanV);
-                    bool cutOff = d.cy + d.h * 0.5f > 0.97f || d.cy - d.h * 0.5f < 0.03f;
-                    if (cutOff) estimate = Mathf.Min(estimate, 1.2f); // body cut off by the frame = very close
+                    // Combine height (~1.65 m) and shoulder/torso width (~0.52 m) so distance decreases smoothly
+                    // even when the person is close enough that their head/feet are clipped by the 16:9 frame.
+                    float distFromHeight = 1.65f / Mathf.Max(0.06f, d.h * 2f * tanV);
+                    float distFromWidth = 0.52f / Mathf.Max(0.05f, d.w * 2f * tanH);
+                    bool cutOff = (d.cy + d.h * 0.5f > 0.94f) || (d.cy - d.h * 0.5f < 0.06f) || (d.h > 0.74f);
+                    float estimate = cutOff
+                        ? Mathf.Min(distFromHeight, distFromWidth)
+                        : (distFromHeight * 0.6f + distFromWidth * 0.4f);
                     distance = Mathf.Clamp(estimate, 0.5f, maxDetectionDistance);
-                    if (hasSurface && hit.distance < distance) distance = hit.distance;
+                }
+                else if (label == "televisi")
+                {
+                    // Wall-mounted or stand TV (~0.65 m tall): use wall mesh distance when scanned, otherwise box height
+                    if (hasSurface)
+                    {
+                        distance = hit.distance;
+                    }
+                    else
+                    {
+                        float tvEstimate = 0.65f / Mathf.Max(0.05f, d.h * 2f * tanV);
+                        distance = Mathf.Clamp(tvEstimate, 0.8f, maxDetectionDistance);
+                    }
                 }
                 else if (!isHazard)
                 {
-                    // Small everyday objects (phone, water bottle, mug, etc.) may be held in hand in mid-air
-                    // where the Spatial Mesh only sees the distant wall behind them (or no surface at all).
-                    float handheldEstimate = 0.24f / Mathf.Max(0.04f, d.h * 2f * tanV);
+                    // Everyday objects (laptop, mug/cup, water bottle, phone, book, etc.)
+                    float refHeight = label == "laptop" ? 0.30f : 0.24f;
+                    float handheldEstimate = refHeight / Mathf.Max(0.04f, d.h * 2f * tanV);
                     if (!hasSurface)
                     {
-                        distance = Mathf.Clamp(handheldEstimate, 0.5f, 2.5f);
+                        distance = Mathf.Clamp(handheldEstimate, 0.5f, 3.0f);
                     }
-                    else if (d.h >= 0.16f && hit.distance > handheldEstimate + 0.5f)
+                    else if (d.h >= 0.14f && hit.distance > handheldEstimate + 0.5f)
                     {
                         distance = Mathf.Clamp(handheldEstimate, 0.5f, hit.distance);
                     }
@@ -581,9 +615,7 @@ namespace ByYourSight.Perception
                 }
                 else
                 {
-                    // Furniture / hazard object (chair, desk, shelf, door, trash bin, bag, etc.):
-                    // Use Spatial Mesh hit distance when available; otherwise estimate from bounding box height
-                    // so detections visible on http://127.0.0.1:8765 are never discarded when mesh is unscanned.
+                    // Furniture / hazard object (chair, desk, shelf, door, trash bin, bag, etc.)
                     if (hasSurface)
                     {
                         distance = hit.distance;
@@ -596,9 +628,10 @@ namespace ByYourSight.Perception
                 }
                 Vector3 point = pose.position + worldDir * distance;
 
-                float width = Mathf.Clamp(d.w * 2f * tanH * distance, 0.1f, 3f);
-                float height = Mathf.Clamp(d.h * 2f * tanV * distance, 0.1f, 2.2f);
-                float depth = Mathf.Clamp(width, 0.15f, 0.6f);
+                float minSize = label == "televisi" ? 0.75f : (!isHazard && !isPerson ? 0.36f : 0.15f);
+                float width = Mathf.Clamp(d.w * 2f * tanH * distance, minSize, 3f);
+                float height = Mathf.Clamp(d.h * 2f * tanV * distance, minSize, 2.2f);
+                float depth = Mathf.Clamp(width, 0.25f, 0.6f);
                 Vector3 size = new Vector3(width, height, depth);
 
                 TrackedDetection t = FindMatch(label, point, isPerson);
@@ -610,7 +643,7 @@ namespace ByYourSight.Perception
                 else
                 {
                     Transform m = t.marker.transform;
-                    float follow = isPerson ? 0.8f : 0.35f;
+                    float follow = isPerson ? 0.85f : 0.35f;
                     m.position = Vector3.Lerp(m.position, point, follow);
                     m.localScale = Vector3.Lerp(m.localScale, size, 0.3f);
                     FaceUser(m, pose.position);
@@ -626,28 +659,33 @@ namespace ByYourSight.Perception
 
             lastDetectedLabels = string.Join(", ", labels);
 
-            // Negative evidence: an object that should be visible in this frame but wasn't detected is fading away
-            for (int i = _tracked.Count - 1; i >= 0; i--)
+            if (!forceProcess)
             {
-                TrackedDetection t = _tracked[i];
-                if (t.isPerson || matched.Contains(t) || t.marker == null)
-                    continue;
-
-                if (IsVisibleInFrame(t.marker.transform.position, pose.position, camRot, tanH, tanV))
+                // Keep EverydayObject markers (cup, laptop, TV, bottle, phone) anchored even if YOLO flickers for a few frames
+                for (int i = _tracked.Count - 1; i >= 0; i--)
                 {
-                    t.misses++;
-                    if (t.misses >= missesBeforeRemoval)
-                        RemoveAt(i);
+                    TrackedDetection t = _tracked[i];
+                    if (t.isPerson || matched.Contains(t) || t.marker == null)
+                        continue;
+                    if (t.marker.category == SemanticObjectCategory.EverydayObject)
+                        continue;
+
+                    if (IsVisibleInFrame(t.marker.transform.position, pose.position, camRot, tanH, tanV))
+                    {
+                        t.misses++;
+                        if (t.misses >= missesBeforeRemoval)
+                            RemoveAt(i);
+                    }
                 }
             }
         }
 
         /// <summary>
         /// Returns the most central non-person object actively detected on the camera stream (http://127.0.0.1:8765)
-        /// within the last maxAgeSeconds. Prioritizes everyday handheld objects (phone, bottle, cup, book, laptop, etc.)
+        /// within the last maxAgeSeconds. Prioritizes everyday handheld objects (phone, bottle, cup, book, laptop, TV, etc.)
         /// closest to the center of the camera frame (cx=0.5, cy=0.5).
         /// </summary>
-        public TrackableObject GetMostCentralActiveDetection(float maxAgeSeconds = 10.0f)
+        public TrackableObject GetMostCentralActiveDetection(float maxAgeSeconds = 20.0f)
         {
             if (_latestResponse != null && (Time.realtimeSinceStartup - _latestResponseWallTime) <= maxAgeSeconds)
             {
@@ -680,8 +718,8 @@ namespace ByYourSight.Perception
 
         /// <summary>
         /// Directly resolves the best live camera detection for KF01 ("Ini apa?").
-        /// If two everyday objects (e.g. "Laptop" and "Cangkir") are simultaneously visible in the camera frame,
-        /// combines their names ("Laptop dan Cangkir") so neither is missed.
+        /// Prioritizes EverydayObjects (cup, laptop, TV, bottle, phone) over furniture (table/desk),
+        /// and combines two tabletop EverydayObjects (e.g. "Laptop dan Cangkir") when both are present.
         /// </summary>
         public bool TryGetBestLiveDetection(
             Transform head,
@@ -690,7 +728,7 @@ namespace ByYourSight.Perception
             out Vector3 targetPoint,
             out float distanceMeters,
             out string detailedDescription,
-            float maxAgeSeconds = 10.0f)
+            float maxAgeSeconds = 25.0f)
         {
             bestMarker = null;
             indonesianLabel = "";
@@ -704,13 +742,25 @@ namespace ByYourSight.Perception
             }
 
             float now = Time.time;
+            Transform cam = head != null ? head : GetCameraTransform();
+            Vector3 headPos = cam != null ? cam.position : Vector3.zero;
+            Vector3 headFwd = cam != null ? cam.forward : Vector3.forward;
+
             List<TrackedDetection> candidates = new List<TrackedDetection>();
             foreach (TrackedDetection t in _tracked)
             {
                 if (t == null || t.isPerson || t.marker == null)
                     continue;
-                if (now - t.lastSeen > maxAgeSeconds)
+                float age = now - t.lastSeen;
+                if (age > maxAgeSeconds)
                     continue;
+
+                float angle = Vector3.Angle(headFwd, t.marker.transform.position - headPos);
+                bool inLiveFrame = age <= 3.5f;
+                // Ignore objects from an older view direction if the user has turned their head away (> 48 degrees)
+                if (!inLiveFrame && angle > 48f)
+                    continue;
+
                 candidates.Add(t);
             }
 
@@ -723,30 +773,39 @@ namespace ByYourSight.Perception
                 int prioB = b.marker.category == SemanticObjectCategory.EverydayObject ? 0 : 1;
                 if (prioA != prioB)
                     return prioA.CompareTo(prioB);
-                return a.lastCenterOffset.CompareTo(b.lastCenterOffset);
+
+                float angleA = Vector3.Angle(headFwd, a.marker.transform.position - headPos);
+                float angleB = Vector3.Angle(headFwd, b.marker.transform.position - headPos);
+                float scoreA = (now - a.lastSeen <= 3.5f) ? a.lastCenterOffset * 30f : angleA;
+                float scoreB = (now - b.lastSeen <= 3.5f) ? b.lastCenterOffset * 30f : angleB;
+                return scoreA.CompareTo(scoreB);
             });
 
             TrackedDetection best = candidates[0];
             bestMarker = best.marker;
             targetPoint = best.marker.transform.position;
-            Vector3 headPos = head != null ? head.position : GetCameraTransform().position;
             distanceMeters = Mathf.Clamp(Vector3.Distance(headPos, targetPoint), 0.4f, maxDetectionDistance);
             detailedDescription = best.marker.detailedDescription;
 
             string primaryLabel = ToIndonesianLabel(best.label);
             string secondaryLabel = null;
 
-            if (best.marker.category == SemanticObjectCategory.EverydayObject)
+            // Combine tabletop everyday objects (e.g. "Laptop dan Cangkir") when both are in view
+            if (best.marker.category == SemanticObjectCategory.EverydayObject &&
+                !string.Equals(primaryLabel, "Televisi", StringComparison.OrdinalIgnoreCase))
             {
                 for (int i = 1; i < candidates.Count; i++)
                 {
                     TrackedDetection other = candidates[i];
                     if (other.marker.category != SemanticObjectCategory.EverydayObject)
                         continue;
-                    if (now - other.lastSeen > 4.0f)
+                    if (now - other.lastSeen > 12.0f)
                         continue;
 
                     string candidateName = ToIndonesianLabel(other.label);
+                    if (string.Equals(candidateName, "Televisi", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     if (!string.Equals(candidateName, primaryLabel, StringComparison.OrdinalIgnoreCase))
                     {
                         secondaryLabel = candidateName;
