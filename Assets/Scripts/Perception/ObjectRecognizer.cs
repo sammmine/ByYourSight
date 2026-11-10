@@ -27,9 +27,28 @@ namespace ByYourSight.Perception
         public float personDetectionRadius = 3.0f;
         public float personAlertCooldown = 8.0f;
 
+        [Header("Nearby Person Notice (KF08 - P2)")]
+        [Tooltip("A person this close and in front of the user is announced once, even when standing still")]
+        public float personNearbyDistance = 2.0f;
+        [Tooltip("Half-angle around the head direction that counts as in front of the user")]
+        public float personNearbyHalfAngle = 30f;
+        [Tooltip("The person must stay in front this long before being announced")]
+        public float personNearbyConfirmSeconds = 0.5f;
+        [Tooltip("The notice can repeat after nobody has been nearby for this long")]
+        public float personNearbyResetSeconds = 5f;
+
+        /// <summary>Last sentence spoken by "Ada apa saja?", so "Batal" can stop it.</summary>
+        public string LastViewSummary { get; private set; } = "";
+
         private readonly Dictionary<TrackableObject, float> _lastPersonAlertTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _lastPersonSampleTime = new Dictionary<TrackableObject, float>();
+        private readonly Dictionary<TrackableObject, int> _personApproachStreak = new Dictionary<TrackableObject, int>();
+        private float _lastPersonSpeechTime = -999f;
+        private float _nextNearbyPersonCheckTime = 0f;
+        private float _nearbyPersonSince = -1f;
+        private float _lastNearbyPersonTime = -999f;
+        private bool _nearbyPersonAnnounced = false;
 
         [System.Serializable]
         private class SavedSpatialAnchorData
@@ -210,6 +229,46 @@ namespace ByYourSight.Perception
                 targetPoint,
                 detailMsg
             );
+        }
+
+        /// <summary>
+        /// "Ada apa saja?": speaks everything in the newest camera frame as one short sentence.
+        /// "Detail" reads the full list when some items did not fit.
+        /// </summary>
+        public void DescribeCurrentView()
+        {
+            PriorityAudioManager audio = PriorityAudioManager.Instance;
+            if (audio == null)
+                return;
+
+            RealWorldObjectDetector detector = FindObjectOfType<RealWorldObjectDetector>();
+            string shortSummary = "";
+            string fullSummary = "";
+            RealWorldObjectDetector.ViewSummaryStatus status = detector != null
+                ? detector.DescribeCurrentView(out shortSummary, out fullSummary)
+                : RealWorldObjectDetector.ViewSummaryStatus.CameraNotReady;
+
+            if (status == RealWorldObjectDetector.ViewSummaryStatus.CameraNotReady)
+            {
+                audio.PlayEarcon(EarconType.Failure);
+                audio.EnqueueSpeech("Kamera belum siap", AudioPriority.P3_ObjectIdentity);
+                return;
+            }
+
+            if (status == RealWorldObjectDetector.ViewSummaryStatus.NothingDetected)
+            {
+                audio.PlayEarcon(EarconType.Failure);
+                audio.EnqueueSpeech("Tidak ada benda terdeteksi di depan", AudioPriority.P3_ObjectIdentity);
+                return;
+            }
+
+            LastViewSummary = shortSummary;
+            audio.PlayEarcon(EarconType.Success);
+
+            // Without a position the voice would come from wherever the last object was
+            Transform head = Camera.main != null ? Camera.main.transform : null;
+            Vector3? voicePosition = head != null ? head.position + head.forward * 0.5f : (Vector3?)null;
+            audio.EnqueueSpeech(shortSummary, AudioPriority.P3_ObjectIdentity, voicePosition, fullSummary);
         }
 
         /// <summary>
@@ -637,12 +696,14 @@ namespace ByYourSight.Perception
             Transform head = Camera.main.transform;
             TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
 
+            MonitorNearbyPerson(head, allObjects);
+
             foreach (var obj in allObjects)
             {
                 if (obj.category != SemanticObjectCategory.Person)
                     continue;
 
-                // Sample every 0.5 s: camera-estimated distances jitter, so require a real approach (~0.4 m/s)
+                // Sample every 0.5 s: camera-estimated distances jitter, so require two closer samples in a row (~0.3 m/s for 1 s)
                 float lastSample = _lastPersonSampleTime.TryGetValue(obj, out float ls) ? ls : -999f;
                 if (Time.time - lastSample < 0.5f)
                     continue;
@@ -651,26 +712,95 @@ namespace ByYourSight.Perception
                 float currentDist = Vector3.Distance(head.position, obj.transform.position);
                 if (_previousPersonDistance.TryGetValue(obj, out float prevDist))
                 {
-                    bool isGettingCloser = (prevDist - currentDist) > 0.2f;
-                    if (currentDist <= personDetectionRadius && isGettingCloser)
+                    int streak = (prevDist - currentDist) > 0.15f
+                        ? (_personApproachStreak.TryGetValue(obj, out int s) ? s : 0) + 1
+                        : 0;
+                    _personApproachStreak[obj] = streak;
+
+                    if (currentDist <= personDetectionRadius && streak >= 2)
                     {
                         float lastAlert = _lastPersonAlertTime.TryGetValue(obj, out float t) ? t : -999f;
-                        if (Time.time - lastAlert >= personAlertCooldown)
+                        if (Time.time - lastAlert >= personAlertCooldown && Time.time - _lastPersonSpeechTime >= personAlertCooldown)
                         {
                             _lastPersonAlertTime[obj] = Time.time;
                             string dir = PriorityAudioManager.GetRelativeBodyDirection(head, obj.transform.position);
                             obj.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 2.5f);
 
-                            PriorityAudioManager.Instance.EnqueueSpeech(
-                                $"Orang mendekat, {dir}",
-                                AudioPriority.P2_SocialInfo,
-                                obj.transform.position
-                            );
+                            if (PriorityAudioManager.Instance.EnqueueSpeech(
+                                    $"Orang mendekat, {dir}",
+                                    AudioPriority.P2_SocialInfo,
+                                    obj.transform.position))
+                            {
+                                _lastPersonSpeechTime = Time.time;
+                            }
                         }
                     }
                 }
 
                 _previousPersonDistance[obj] = currentDist;
+            }
+        }
+
+        /// <summary>
+        /// KF08: Announces a person close in front of the user once, even when nobody is moving.
+        /// It stays quiet until nobody has been nearby for personNearbyResetSeconds.
+        /// </summary>
+        private void MonitorNearbyPerson(Transform head, TrackableObject[] allObjects)
+        {
+            if (Time.time < _nextNearbyPersonCheckTime)
+                return;
+            _nextNearbyPersonCheckTime = Time.time + 0.25f;
+
+            Vector3 flatForward = new Vector3(head.forward.x, 0f, head.forward.z);
+            TrackableObject nearest = null;
+            float nearestDist = personNearbyDistance;
+
+            foreach (TrackableObject obj in allObjects)
+            {
+                if (obj == null || obj.category != SemanticObjectCategory.Person)
+                    continue;
+
+                Vector3 toPerson = obj.transform.position - head.position;
+                toPerson.y = 0f;
+                float dist = toPerson.magnitude;
+                if (dist <= nearestDist && Vector3.Angle(flatForward, toPerson) <= personNearbyHalfAngle)
+                {
+                    nearestDist = dist;
+                    nearest = obj;
+                }
+            }
+
+            if (nearest == null)
+            {
+                _nearbyPersonSince = -1f;
+                if (Time.time - _lastNearbyPersonTime > personNearbyResetSeconds)
+                    _nearbyPersonAnnounced = false;
+                return;
+            }
+
+            _lastNearbyPersonTime = Time.time;
+            if (_nearbyPersonSince < 0f)
+                _nearbyPersonSince = Time.time;
+
+            if (_nearbyPersonAnnounced || Time.time - _nearbyPersonSince < personNearbyConfirmSeconds)
+                return;
+
+            // "Orang mendekat" was just spoken: the user already knows about this person
+            if (Time.time - _lastPersonSpeechTime < personAlertCooldown)
+            {
+                _nearbyPersonAnnounced = true;
+                return;
+            }
+
+            string dir = PriorityAudioManager.GetRelativeBodyDirection(head, nearest.transform.position);
+            if (PriorityAudioManager.Instance.EnqueueSpeech(
+                    $"Orang, {dir}",
+                    AudioPriority.P2_SocialInfo,
+                    nearest.transform.position))
+            {
+                nearest.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 2.5f);
+                _nearbyPersonAnnounced = true;
+                _lastPersonSpeechTime = Time.time;
             }
         }
     }

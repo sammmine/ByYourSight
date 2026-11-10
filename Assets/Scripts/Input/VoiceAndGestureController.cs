@@ -86,13 +86,17 @@ namespace ByYourSight.InputSystem
             { "ah pah ee knee", "ini apa" },
             { "ah pah ini", "ini apa" },
             { "up a ini", "ini apa" },
-            { "ada apa", "ini apa" },
             { "benda apa", "ini apa" },
             { "objek apa", "ini apa" },
             { "lihat ini", "ini apa" },
             { "lihat depan", "ini apa" },
             { "what is this", "ini apa" },
             { "identify", "ini apa" },
+
+            // "Ada apa saja?": lists everything the camera sees now
+            { "ada apa saja", "ada apa saja" },
+            { "ah dah ah pah sah jah", "ada apa saja" },
+            { "what is around me", "ada apa saja" },
 
             // KF02: "Simpan objek" (uses HUD label if no object specified)
             { "simpan objek", "simpan objek" },
@@ -301,6 +305,13 @@ namespace ByYourSight.InputSystem
                 PriorityAudioManager.Instance.isMuted = false;
             }
 
+            // "Ada apa saja?" / "What is around me?"
+            if (cmd == "ada apa saja")
+            {
+                objectRecognizer?.DescribeCurrentView();
+                return;
+            }
+
             // 3. "Ini apa?" / "What is this?" (KF01)
             if (cmd == "ini apa" || cmd.Contains("ini apa") || cmd.Contains("apa ini") ||
                 cmd.Contains("what is this") || cmd.Contains("what's this") || cmd == "identify")
@@ -422,6 +433,10 @@ namespace ByYourSight.InputSystem
             // 8. "Batal" / "Berhenti" / "Cancel" / "Stop"
             if (cmd == "batal" || cmd == "berhenti" || cmd == "cancel" || cmd == "stop")
             {
+                if (objectRecognizer != null && PriorityAudioManager.Instance.CancelSpeech(objectRecognizer.LastViewSummary))
+                {
+                    PriorityAudioManager.Instance.PlayEarcon(EarconType.ListeningEnd);
+                }
                 navigator?.StopAllGuidance(announce: true);
                 return;
             }
@@ -430,7 +445,7 @@ namespace ByYourSight.InputSystem
             if (cmd == "bantuan" || cmd == "help")
             {
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Ucapkan: Ini apa, Simpan objek, Cari benda, Antar ke pintu, atau Diam",
+                    "Ucapkan: Ini apa, Ada apa saja, Simpan objek, Cari benda, Antar ke pintu, atau Diam",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;
@@ -537,6 +552,7 @@ namespace ByYourSight.InputSystem
         private void HandleKeyboardShortcuts()
         {
             // Quick keyboard shortcuts for demo & usability testing (Wizard of Oz backup)
+            if (Input.GetKeyDown(KeyCode.Alpha0)) ProcessVoiceCommand("Ada apa saja");
             if (Input.GetKeyDown(KeyCode.Alpha1)) ProcessVoiceCommand("Ini apa");
             if (Input.GetKeyDown(KeyCode.Alpha2)) ProcessVoiceCommand($"Simpan {_customSaveLabel}");
             if (Input.GetKeyDown(KeyCode.Alpha3)) ProcessVoiceCommand("Cari Botol minum");
@@ -611,7 +627,7 @@ namespace ByYourSight.InputSystem
 
             // Voice Command Simulation Control Panel (KF01 - KF08) on Left Screen
             GUI.color = Color.white;
-            GUILayout.BeginArea(new Rect(16, 80, 355, 580), "By Your Sight — Bahasa Indonesia (ID/EN)", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(16, 80, 355, 610), "By Your Sight — Bahasa Indonesia (ID/EN)", GUI.skin.window);
 
             string modeLabel = isRealHoloLensRoomMode
                 ? "[R] Mode: RUANGAN NYATA HOLOLENS (Klik untuk Sim)"
@@ -635,6 +651,9 @@ namespace ByYourSight.InputSystem
 
             if (GUILayout.Button("[1] KF01: \"Ini apa?\" (Deteksi Pandangan)"))
                 ProcessVoiceCommand("Ini apa");
+
+            if (GUILayout.Button("[0] \"Ada apa saja?\" (Semua yang Terlihat)"))
+                ProcessVoiceCommand("Ada apa saja");
 
             GUILayout.BeginHorizontal();
             _customSaveLabel = GUILayout.TextField(_customSaveLabel, GUILayout.Width(135));

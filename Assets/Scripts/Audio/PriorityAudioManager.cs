@@ -267,6 +267,22 @@ namespace ByYourSight.Audio
             EnqueueSpeech(textToRepeat, AudioPriority.P3_ObjectIdentity);
         }
 
+        /// <summary>
+        /// Removes this exact sentence from the queue and stops it if it is playing. Other speech is left alone.
+        /// </summary>
+        public bool CancelSpeech(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            bool removed = _queue.RemoveAll(q => q.Text == text) > 0;
+            if (currentSpokenText != text)
+                return removed;
+
+            StopCurrentSpeech();
+            return true;
+        }
+
         public void StopCurrentSpeech()
         {
             _speechBusyUntil = 0f;

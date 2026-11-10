@@ -43,6 +43,20 @@ namespace ByYourSight.Perception
         [Tooltip("An object that should be in view but isn't detected this many times in a row is removed")]
         public int missesBeforeRemoval = 8;
 
+        [Header("People (KF08) & \"Ada apa saja?\" Summary")]
+        [Tooltip("People and summary items below this confidence are not announced")]
+        [Range(0f, 1f)] public float announceMinConfidence = 0.35f;
+        [Tooltip("Used when the top or bottom of a person is outside the frame")]
+        public float personShoulderWidthMeters = 0.5f;
+        [Tooltip("A person box cut off at the bottom whose top edge is below this frame height (0 = top, 1 = bottom) is treated as the user's own hand or arm")]
+        [Range(0f, 1f)] public float ownHandMinTopEdge = 0.65f;
+        [Tooltip("\"Ada apa saja?\" only uses a camera frame newer than this")]
+        public float maxSummaryFrameAgeSeconds = 3f;
+        [Tooltip("Items this close to the frame center count as \"di depan\"")]
+        [Range(0.05f, 0.5f)] public float summaryCenterHalfWidth = 0.17f;
+        [Tooltip("Maximum label-and-direction groups spoken at once. \"Detail\" reads the full list.")]
+        public int summaryMaxGroups = 5;
+
         [Header("Status (Read-Only)")]
         public bool isServerConnected = false;
         public int trackedObjectCount = 0;
@@ -515,7 +529,8 @@ namespace ByYourSight.Perception
                     string mapped = MapLabel(d.label);
                     foreach (TrackedDetection existing in _tracked)
                     {
-                        if (existing != null && existing.label == mapped)
+                        // People move: only a newly processed frame may keep a person marker alive
+                        if (existing != null && !existing.isPerson && existing.label == mapped)
                             existing.lastSeen = Time.time;
                     }
                 }
@@ -543,6 +558,10 @@ namespace ByYourSight.Perception
                 string label = MapLabel(d.label);
                 bool isPerson = label == "orang" || label == "person";
 
+                // A forced re-read may reuse an old frame, which must not bring back a person who has left
+                if (isPerson && (forceProcess || d.conf < announceMinConfidence || IsLikelyOwnHand(d)))
+                    continue;
+
                 // Pixel -> ray: aim at the lower-middle of the box for floor-standing things, the center otherwise
                 float aimY = isPerson ? d.cy : d.cy + d.h * 0.15f;
                 Vector3 localDir = new Vector3((d.cx - 0.5f) * 2f * tanH, -(aimY - 0.5f) * 2f * tanV, 1f);
@@ -556,8 +575,16 @@ namespace ByYourSight.Perception
                     // People are rarely in the Spatial Mesh (they move), so the ray would hit the wall behind them.
                     // Estimate distance from box height, assuming a ~1.7 m tall person.
                     float estimate = 1.7f / Mathf.Max(0.05f, d.h * 2f * tanV);
-                    bool cutOff = d.cy + d.h * 0.5f > 0.97f || d.cy - d.h * 0.5f < 0.03f;
-                    if (cutOff) estimate = Mathf.Min(estimate, 1.2f); // body cut off by the frame = very close
+                    bool cutVertically = d.cy + d.h * 0.5f > 0.97f || d.cy - d.h * 0.5f < 0.03f;
+                    if (cutVertically)
+                    {
+                        // With a level gaze the feet leave the frame within about 4.5 m, so box height says little.
+                        // Use the shoulder width instead, unless the sides are cut off too (then the person is very close).
+                        bool cutSideways = d.cx - d.w * 0.5f < 0.03f || d.cx + d.w * 0.5f > 0.97f;
+                        estimate = cutSideways
+                            ? Mathf.Min(estimate, 1.2f)
+                            : personShoulderWidthMeters / Mathf.Max(0.05f, d.w * 2f * tanH);
+                    }
                     distance = Mathf.Clamp(estimate, 0.5f, maxDetectionDistance);
                     if (hasSurface && hit.distance < distance) distance = hit.distance;
                 }
@@ -640,6 +667,55 @@ namespace ByYourSight.Perception
                         RemoveAt(i);
                 }
             }
+        }
+
+        /// <summary>
+        /// A hand or arm enters the frame from the bottom and stays low. A standing person reaches the upper part of the frame.
+        /// </summary>
+        private bool IsLikelyOwnHand(DetectionDto d)
+        {
+            return d.cy + d.h * 0.5f > 0.97f && d.cy - d.h * 0.5f > ownHandMinTopEdge;
+        }
+
+        public enum ViewSummaryStatus
+        {
+            Ok,
+            CameraNotReady,
+            NothingDetected
+        }
+
+        /// <summary>
+        /// "Ada apa saja?": summarizes what is in the newest camera frame only, so remembered objects are never listed.
+        /// </summary>
+        public ViewSummaryStatus DescribeCurrentView(out string shortSummary, out string fullSummary)
+        {
+            shortSummary = "";
+            fullSummary = "";
+
+            if (!enableDetection || !isServerConnected || _latestResponse == null || _latestResponse.detections == null)
+                return ViewSummaryStatus.CameraNotReady;
+
+            float frameAge = Mathf.Max(0f, Time.realtimeSinceStartup - _latestResponseWallTime) + Mathf.Max(0f, _latestResponse.age);
+            if (frameAge > maxSummaryFrameAgeSeconds)
+                return ViewSummaryStatus.CameraNotReady;
+
+            List<ViewItem> items = new List<ViewItem>();
+            foreach (DetectionDto d in _latestResponse.detections)
+            {
+                if (d == null || string.IsNullOrEmpty(d.label) || d.conf < announceMinConfidence)
+                    continue;
+
+                string label = MapLabel(d.label);
+                bool isPerson = label == "orang" || label == "person";
+                if (isPerson && IsLikelyOwnHand(d))
+                    continue;
+
+                items.Add(new ViewItem { Label = label, IsPerson = isPerson, CenterX = d.cx, Confidence = d.conf });
+            }
+
+            return ViewSummaryBuilder.TryBuild(items, summaryCenterHalfWidth, summaryMaxGroups, out shortSummary, out fullSummary)
+                ? ViewSummaryStatus.Ok
+                : ViewSummaryStatus.NothingDetected;
         }
 
         /// <summary>
