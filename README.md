@@ -271,6 +271,7 @@ Karena mesin *offline* `KeywordRecognizer` pada HoloLens 2 menggunakan model aku
 
 | Perintah Suara (Bahasa Indonesia / Inggris) | Pintasan Keyboard | Kebutuhan Fungsional | Contoh Respon Audio Sistem (Bahasa Indonesia) |
 | :--- | :---: | :--- | :--- |
+| **"Ada apa saja"** / **"Ada apa"** / *"What is around"* | `0` | Ringkasan Sekitar (Maks. 3 Objek) | *"Terlihat 3 benda: Laptop di depan, Gelas agak kanan, dan Kursi di kiri"* |
 | **"Ini apa"** / **"Apa ini"** / *"What is this"* | `1` | KF01: Identifikasi Objek | *"Botol minum, 1 setengah meter, di depan"* |
 | **"Ada apa saja"** / *"What is around me"* | `0` | Ringkasan Pandangan Kamera | *"Orang di depan. Kursi agak kiri. Laptop dan cangkir agak kanan."* |
 | **"Simpan [nama]"** / **"Simpan objek [nama]"** | `2` | KF02: Simpan Benda Permanen | *"Tersimpan, Rak"* (tersimpan ke disk) |
