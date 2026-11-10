@@ -219,9 +219,19 @@ namespace ByYourSight.Perception
 
         private readonly List<HeadPose> _poseHistory = new List<HeadPose>();
         private readonly List<TrackedDetection> _tracked = new List<TrackedDetection>();
+        private DetectionResponse _latestResponse;
+        private float _latestResponseWallTime = -100f;
         private bool _warnedOffline = false;
         private float _lastFrameStamp = -100f;
         private Material _markerMaterial;
+
+        private Transform GetCameraTransform()
+        {
+            if (Camera.main != null)
+                return Camera.main.transform;
+            Camera anyCam = FindObjectOfType<Camera>();
+            return anyCam != null ? anyCam.transform : transform;
+        }
 
         private void OnEnable()
         {
@@ -233,13 +243,13 @@ namespace ByYourSight.Perception
 
         private void Update()
         {
-            if (Camera.main == null)
-                return;
-
-            Transform head = Camera.main.transform;
-            _poseHistory.Add(new HeadPose { time = Time.realtimeSinceStartup, position = head.position, rotation = head.rotation });
-            while (_poseHistory.Count > 0 && Time.realtimeSinceStartup - _poseHistory[0].time > 5f)
-                _poseHistory.RemoveAt(0);
+            Transform head = GetCameraTransform();
+            if (head != null)
+            {
+                _poseHistory.Add(new HeadPose { time = Time.realtimeSinceStartup, position = head.position, rotation = head.rotation });
+                while (_poseHistory.Count > 0 && Time.realtimeSinceStartup - _poseHistory[0].time > 5f)
+                    _poseHistory.RemoveAt(0);
+            }
 
             for (int i = _tracked.Count - 1; i >= 0; i--)
             {
@@ -249,6 +259,28 @@ namespace ByYourSight.Perception
                     RemoveAt(i);
             }
             trackedObjectCount = _tracked.Count;
+        }
+
+        public bool IngestRawDetectionJson(string json, float requestTime)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+            try
+            {
+                DetectionResponse resp = JsonUtility.FromJson<DetectionResponse>(json);
+                if (resp != null)
+                {
+                    isServerConnected = true;
+                    _warnedOffline = false;
+                    ProcessDetections(resp, requestTime, forceProcess: true);
+                    return resp.detections != null && resp.detections.Length > 0;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Detection] Could not parse live server response: " + e.Message);
+            }
+            return false;
         }
 
         private IEnumerator PollLoop()
@@ -446,22 +478,49 @@ namespace ByYourSight.Perception
             }
         }
 
-        private void ProcessDetections(DetectionResponse resp, float requestTime)
+        private void ProcessDetections(DetectionResponse resp, float requestTime, bool forceProcess = false)
         {
-            if (resp.detections == null || _poseHistory.Count == 0)
+            if (resp == null || resp.detections == null)
                 return;
 
-            // Stale result (stream dropped, server still returns the last frame): head pose can't be matched
-            if (resp.age > 2f)
+            // Allow up to 15s frame age so CPU-bound YOLO inference + Holographic Remoting never drops valid frames
+            if (resp.age > 15f)
             {
                 lastDetectedLabels = "";
                 return;
             }
 
-            // Same frame as last poll (YOLO slower than polling): already processed
+            _latestResponse = resp;
+            _latestResponseWallTime = requestTime;
+
+            if (_poseHistory.Count == 0)
+            {
+                Transform cam = GetCameraTransform();
+                _poseHistory.Add(new HeadPose
+                {
+                    time = Time.realtimeSinceStartup,
+                    position = cam != null ? cam.position : Vector3.zero,
+                    rotation = cam != null ? cam.rotation : Quaternion.identity
+                });
+            }
+
+            // Same frame as last poll (YOLO slower than polling): refresh lastSeen on active markers so they never expire
             float frameStamp = requestTime - Mathf.Max(0f, resp.age);
-            if (Mathf.Abs(frameStamp - _lastFrameStamp) < 0.03f)
+            if (!forceProcess && Mathf.Abs(frameStamp - _lastFrameStamp) < 0.03f)
+            {
+                foreach (DetectionDto d in resp.detections)
+                {
+                    if (d == null || string.IsNullOrEmpty(d.label) || d.conf < minConfidence)
+                        continue;
+                    string mapped = MapLabel(d.label);
+                    foreach (TrackedDetection existing in _tracked)
+                    {
+                        if (existing != null && existing.label == mapped)
+                            existing.lastSeen = Time.time;
+                    }
+                }
                 return;
+            }
             _lastFrameStamp = frameStamp;
 
             // Head pose at the moment the camera frame was captured
@@ -585,11 +644,16 @@ namespace ByYourSight.Perception
 
         /// <summary>
         /// Returns the most central non-person object actively detected on the camera stream (http://127.0.0.1:8765)
-        /// within the last maxAgeSeconds. Prioritizes everyday handheld objects (phone, bottle, cup, book, etc.)
+        /// within the last maxAgeSeconds. Prioritizes everyday handheld objects (phone, bottle, cup, book, laptop, etc.)
         /// closest to the center of the camera frame (cx=0.5, cy=0.5).
         /// </summary>
-        public TrackableObject GetMostCentralActiveDetection( float maxAgeSeconds = 4.0f)
+        public TrackableObject GetMostCentralActiveDetection(float maxAgeSeconds = 10.0f)
         {
+            if (_latestResponse != null && (Time.realtimeSinceStartup - _latestResponseWallTime) <= maxAgeSeconds)
+            {
+                ProcessDetections(_latestResponse, _latestResponseWallTime, forceProcess: true);
+            }
+
             TrackableObject best = null;
             float bestScore = float.MaxValue;
             float now = Time.time;
@@ -612,6 +676,90 @@ namespace ByYourSight.Perception
             }
 
             return best;
+        }
+
+        /// <summary>
+        /// Directly resolves the best live camera detection for KF01 ("Ini apa?").
+        /// If two everyday objects (e.g. "Laptop" and "Cangkir") are simultaneously visible in the camera frame,
+        /// combines their names ("Laptop dan Cangkir") so neither is missed.
+        /// </summary>
+        public bool TryGetBestLiveDetection(
+            Transform head,
+            out TrackableObject bestMarker,
+            out string indonesianLabel,
+            out Vector3 targetPoint,
+            out float distanceMeters,
+            out string detailedDescription,
+            float maxAgeSeconds = 10.0f)
+        {
+            bestMarker = null;
+            indonesianLabel = "";
+            targetPoint = Vector3.zero;
+            distanceMeters = 0f;
+            detailedDescription = "";
+
+            if (_latestResponse != null && (Time.realtimeSinceStartup - _latestResponseWallTime) <= maxAgeSeconds)
+            {
+                ProcessDetections(_latestResponse, _latestResponseWallTime, forceProcess: true);
+            }
+
+            float now = Time.time;
+            List<TrackedDetection> candidates = new List<TrackedDetection>();
+            foreach (TrackedDetection t in _tracked)
+            {
+                if (t == null || t.isPerson || t.marker == null)
+                    continue;
+                if (now - t.lastSeen > maxAgeSeconds)
+                    continue;
+                candidates.Add(t);
+            }
+
+            if (candidates.Count == 0)
+                return false;
+
+            candidates.Sort((a, b) =>
+            {
+                int prioA = a.marker.category == SemanticObjectCategory.EverydayObject ? 0 : 1;
+                int prioB = b.marker.category == SemanticObjectCategory.EverydayObject ? 0 : 1;
+                if (prioA != prioB)
+                    return prioA.CompareTo(prioB);
+                return a.lastCenterOffset.CompareTo(b.lastCenterOffset);
+            });
+
+            TrackedDetection best = candidates[0];
+            bestMarker = best.marker;
+            targetPoint = best.marker.transform.position;
+            Vector3 headPos = head != null ? head.position : GetCameraTransform().position;
+            distanceMeters = Mathf.Clamp(Vector3.Distance(headPos, targetPoint), 0.4f, maxDetectionDistance);
+            detailedDescription = best.marker.detailedDescription;
+
+            string primaryLabel = ToIndonesianLabel(best.label);
+            string secondaryLabel = null;
+
+            if (best.marker.category == SemanticObjectCategory.EverydayObject)
+            {
+                for (int i = 1; i < candidates.Count; i++)
+                {
+                    TrackedDetection other = candidates[i];
+                    if (other.marker.category != SemanticObjectCategory.EverydayObject)
+                        continue;
+                    if (now - other.lastSeen > 4.0f)
+                        continue;
+
+                    string candidateName = ToIndonesianLabel(other.label);
+                    if (!string.Equals(candidateName, primaryLabel, StringComparison.OrdinalIgnoreCase))
+                    {
+                        secondaryLabel = candidateName;
+                        break;
+                    }
+                }
+            }
+
+            indonesianLabel = string.IsNullOrEmpty(secondaryLabel)
+                ? primaryLabel
+                : $"{primaryLabel} dan {secondaryLabel}";
+
+            return true;
         }
 
         private TrackedDetection FindMatch(string label, Vector3 point, bool isPerson)

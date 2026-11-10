@@ -95,14 +95,10 @@ namespace ByYourSight.InputSystem
 
             // Audio control: "Ulangi" & "Detail"
             { "ulangi", "ulangi" },
-            { "oo lung ee", "ulangi" },
-            { "oo lang ee", "ulangi" },
             { "ulang", "ulangi" },
             { "repeat", "ulangi" },
             { "detail", "detail" },
             { "dee tail", "detail" },
-            { "rincian", "detail" },
-            { "jelaskan", "detail" },
             { "details", "detail" },
 
             // KF06: "Diam" & "Lanjut"
