@@ -86,13 +86,34 @@ namespace ByYourSight.InputSystem
             { "ah pah ee knee", "ini apa" },
             { "ah pah ini", "ini apa" },
             { "up a ini", "ini apa" },
-            { "ada apa", "ini apa" },
             { "benda apa", "ini apa" },
             { "objek apa", "ini apa" },
             { "lihat ini", "ini apa" },
             { "lihat depan", "ini apa" },
             { "what is this", "ini apa" },
             { "identify", "ini apa" },
+
+            // "Ada apa saja?" (Overview / Maksimal 3 benda terlihat)
+            { "ada apa saja", "ada apa saja" },
+            { "ada apa", "ada apa saja" },
+            { "apa saja", "ada apa saja" },
+            { "ada apa aja", "ada apa saja" },
+            { "apa aja", "ada apa saja" },
+            { "ada apa sajah", "ada apa saja" },
+            { "ada apa ajah", "ada apa saja" },
+            { "ah dah ah pah sah jah", "ada apa saja" },
+            { "ah dah ah pah", "ada apa saja" },
+            { "lihat sekitar", "ada apa saja" },
+            { "lihat sekeliling", "ada apa saja" },
+            { "lihat semua", "ada apa saja" },
+            { "benda apa saja", "ada apa saja" },
+            { "objek apa saja", "ada apa saja" },
+            { "what is around", "ada apa saja" },
+            { "what is there", "ada apa saja" },
+            { "what's there", "ada apa saja" },
+            { "what do you see", "ada apa saja" },
+            { "see around", "ada apa saja" },
+            { "look around", "ada apa saja" },
 
             // KF02: "Simpan objek" (uses HUD label if no object specified)
             { "simpan objek", "simpan objek" },
@@ -309,6 +330,16 @@ namespace ByYourSight.InputSystem
                 return;
             }
 
+            // "Ada apa saja?" / "What is there?" (Maksimal 3 benda terlihat)
+            if (cmd == "ada apa saja" || cmd.Contains("ada apa saja") || cmd == "ada apa" || cmd == "apa saja" ||
+                cmd == "ada apa aja" || cmd == "apa aja" || cmd == "lihat sekitar" || cmd == "lihat sekeliling" ||
+                cmd.Contains("what is around") || cmd.Contains("what is there") || cmd.Contains("what's there") ||
+                cmd == "look around" || cmd == "see around")
+            {
+                objectRecognizer?.IdentifyAllVisibleObjects(3);
+                return;
+            }
+
             // "Daftar simpanan" / "List saved"
             if (cmd == "daftar simpanan" || cmd == "list saved")
             {
@@ -430,7 +461,7 @@ namespace ByYourSight.InputSystem
             if (cmd == "bantuan" || cmd == "help")
             {
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Ucapkan: Ini apa, Simpan objek, Cari benda, Antar ke pintu, atau Diam",
+                    "Ucapkan: Ini apa, Ada apa saja, Simpan objek, Cari benda, Antar ke pintu, atau Diam",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;
@@ -537,6 +568,7 @@ namespace ByYourSight.InputSystem
         private void HandleKeyboardShortcuts()
         {
             // Quick keyboard shortcuts for demo & usability testing (Wizard of Oz backup)
+            if (Input.GetKeyDown(KeyCode.Alpha0)) ProcessVoiceCommand("Ada apa saja");
             if (Input.GetKeyDown(KeyCode.Alpha1)) ProcessVoiceCommand("Ini apa");
             if (Input.GetKeyDown(KeyCode.Alpha2)) ProcessVoiceCommand($"Simpan {_customSaveLabel}");
             if (Input.GetKeyDown(KeyCode.Alpha3)) ProcessVoiceCommand("Cari Botol minum");
@@ -632,6 +664,9 @@ namespace ByYourSight.InputSystem
                 GUILayout.Label(camStatus);
             }
             GUILayout.Space(6);
+
+            if (GUILayout.Button("[0] \"Ada apa saja?\" (Maksimal 3 benda)"))
+                ProcessVoiceCommand("Ada apa saja");
 
             if (GUILayout.Button("[1] KF01: \"Ini apa?\" (Deteksi Pandangan)"))
                 ProcessVoiceCommand("Ini apa");

@@ -56,6 +56,17 @@ namespace ByYourSight.Perception
         }
 
         [Serializable]
+        public class VisibleObjectItem
+        {
+            public TrackableObject marker;
+            public string label;
+            public Vector3 position;
+            public float distance;
+            public string direction;
+            public string detailedDescription;
+        }
+
+        [Serializable]
         private class DetectionDto
         {
             public string label;
@@ -826,6 +837,157 @@ namespace ByYourSight.Perception
             indonesianLabel = ToIndonesianLabel(best.label);
 
             return true;
+        }
+
+        /// <summary>
+        /// Resolves up to maxCount visible objects for "Ada apa saja?" ("What is around?").
+        /// Prioritizes current camera frame objects, distinct object types over duplicate labels,
+        /// specific objects (EverydayObjects / Hazards / People) over generic tables,
+        /// and orders them by visual importance (center offset).
+        /// </summary>
+        public bool TryGetVisibleObjects(
+            Transform head,
+            int maxCount,
+            out List<VisibleObjectItem> results,
+            float maxAgeSeconds = 25.0f)
+        {
+            results = new List<VisibleObjectItem>();
+
+            DetectionResponse activeResp = (_latestResponse != null && _latestResponse.detections != null && _latestResponse.detections.Length > 0)
+                ? _latestResponse
+                : _latestNonEmptyResponse;
+            float activeWallTime = (activeResp == _latestResponse) ? _latestResponseWallTime : _latestNonEmptyWallTime;
+
+            if (activeResp != null && (Time.realtimeSinceStartup - activeWallTime) <= maxAgeSeconds)
+            {
+                ProcessDetections(activeResp, activeWallTime, forceProcess: true);
+            }
+
+            float now = Time.time;
+            Transform cam = head != null ? head : GetCameraTransform();
+            Vector3 headPos = cam != null ? cam.position : Vector3.zero;
+            Quaternion headRot = cam != null ? cam.rotation : Quaternion.identity;
+
+            List<TrackedDetection> latestBatchCandidates = new List<TrackedDetection>();
+            List<TrackedDetection> allCandidates = new List<TrackedDetection>();
+
+            foreach (TrackedDetection t in _tracked)
+            {
+                if (t == null || t.marker == null)
+                    continue;
+                float age = now - t.lastSeen;
+                if (age > maxAgeSeconds)
+                    continue;
+
+                allCandidates.Add(t);
+                if (Mathf.Abs(t.lastSeen - _lastNonEmptyBatchTime) <= 0.75f && age <= 15.0f)
+                {
+                    latestBatchCandidates.Add(t);
+                }
+            }
+
+            List<TrackedDetection> candidates = latestBatchCandidates.Count > 0 ? latestBatchCandidates : allCandidates;
+            if (candidates.Count == 0)
+                return false;
+
+            // Sort candidates by priority:
+            // 1. Specific objects (buku, gelas, botol, laptop, kursi, orang, TV, etc.) beat generic table ("meja")
+            // 2. Objects closer to the camera center (cx=0.5, cy=0.5)
+            candidates.Sort((a, b) =>
+            {
+                int tableA = IsGenericTableLabel(a.label) ? 1 : 0;
+                int tableB = IsGenericTableLabel(b.label) ? 1 : 0;
+                if (tableA != tableB)
+                    return tableA.CompareTo(tableB);
+
+                return a.lastCenterOffset.CompareTo(b.lastCenterOffset);
+            });
+
+            float tanH = Mathf.Tan(cameraHorizontalFov * 0.5f * Mathf.Deg2Rad);
+            float tanV = tanH * (9f / 16f);
+
+            HashSet<string> seenLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Pass 1: pick distinct object labels so we get a diverse set of up to maxCount items
+            foreach (TrackedDetection t in candidates)
+            {
+                if (results.Count >= maxCount)
+                    break;
+
+                string indo = ToIndonesianLabel(t.label);
+                if (seenLabels.Contains(indo))
+                    continue;
+
+                Vector3 localDir = new Vector3((t.lastCx - 0.5f) * 2f * tanH, -(t.lastCy - 0.5f) * 2f * tanV, 1f).normalized;
+                Vector3 worldDir = headRot * localDir;
+
+                float dist = Mathf.Clamp(
+                    t.lastEstimatedDistance > 0.1f ? t.lastEstimatedDistance : Vector3.Distance(headPos, t.marker.transform.position),
+                    0.5f,
+                    maxDetectionDistance
+                );
+                Vector3 targetPoint = headPos + worldDir * dist;
+                t.marker.transform.position = targetPoint;
+                string dir = PriorityAudioManager.GetRelativeBodyDirection(cam, targetPoint);
+
+                results.Add(new VisibleObjectItem
+                {
+                    marker = t.marker,
+                    label = indo,
+                    position = targetPoint,
+                    distance = dist,
+                    direction = dir,
+                    detailedDescription = t.marker.detailedDescription
+                });
+                seenLabels.Add(indo);
+            }
+
+            // Pass 2: if still under maxCount (e.g. multiple items of same label), include remaining candidates
+            if (results.Count < maxCount)
+            {
+                foreach (TrackedDetection t in candidates)
+                {
+                    if (results.Count >= maxCount)
+                        break;
+
+                    bool alreadyAdded = false;
+                    foreach (var res in results)
+                    {
+                        if (res.marker == t.marker)
+                        {
+                            alreadyAdded = true;
+                            break;
+                        }
+                    }
+                    if (alreadyAdded)
+                        continue;
+
+                    string indo = ToIndonesianLabel(t.label);
+                    Vector3 localDir = new Vector3((t.lastCx - 0.5f) * 2f * tanH, -(t.lastCy - 0.5f) * 2f * tanV, 1f).normalized;
+                    Vector3 worldDir = headRot * localDir;
+
+                    float dist = Mathf.Clamp(
+                        t.lastEstimatedDistance > 0.1f ? t.lastEstimatedDistance : Vector3.Distance(headPos, t.marker.transform.position),
+                        0.5f,
+                        maxDetectionDistance
+                    );
+                    Vector3 targetPoint = headPos + worldDir * dist;
+                    t.marker.transform.position = targetPoint;
+                    string dir = PriorityAudioManager.GetRelativeBodyDirection(cam, targetPoint);
+
+                    results.Add(new VisibleObjectItem
+                    {
+                        marker = t.marker,
+                        label = indo,
+                        position = targetPoint,
+                        distance = dist,
+                        direction = dir,
+                        detailedDescription = t.marker.detailedDescription
+                    });
+                }
+            }
+
+            return results.Count > 0;
         }
 
         private TrackedDetection FindMatch(string label, Vector3 point, bool isPerson)

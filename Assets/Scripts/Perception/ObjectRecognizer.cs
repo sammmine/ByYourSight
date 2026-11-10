@@ -218,6 +218,205 @@ namespace ByYourSight.Perception
         }
 
         /// <summary>
+        /// "Ada apa saja?" / "What is there?"
+        /// Announces up to maxCount (default 3) objects visible to the user.
+        /// Prioritizes live AI camera detections (http://127.0.0.1:8765/detections),
+        /// with graceful fallback to scene objects if testing in simulation mode.
+        /// </summary>
+        public void IdentifyAllVisibleObjects(int maxCount = 3)
+        {
+            if (PriorityAudioManager.Instance == null)
+                return;
+
+            Camera activeCam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+            if (activeCam == null)
+                return;
+
+            if (simulateLowLightWarning)
+            {
+                PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
+                PriorityAudioManager.Instance.EnqueueSpeech(
+                    "Kurang jelas, cahaya redup. Dekatkan ke objek",
+                    AudioPriority.P3_ObjectIdentity
+                );
+                return;
+            }
+
+            Transform head = activeCam.transform;
+
+            RealWorldObjectDetector camDetector = FindObjectOfType<RealWorldObjectDetector>();
+            if (camDetector == null)
+                camDetector = gameObject.AddComponent<RealWorldObjectDetector>();
+
+            // 1. Highest Priority: Live AI Camera Detection from http://127.0.0.1:8765/detections
+            if (camDetector != null && camDetector.TryGetVisibleObjects(head, maxCount, out List<RealWorldObjectDetector.VisibleObjectItem> items))
+            {
+                AnnounceVisibleObjects(items, head);
+                return;
+            }
+
+            // 2. If no objects cached yet, query the detection server on-demand before fallback
+            StartCoroutine(IdentifyAllVisibleObjectsCoroutine(head, maxCount, camDetector));
+        }
+
+        private IEnumerator IdentifyAllVisibleObjectsCoroutine(Transform head, int maxCount, RealWorldObjectDetector camDetector)
+        {
+            if (camDetector != null && camDetector.enableDetection)
+            {
+                string primaryUrl = string.IsNullOrWhiteSpace(camDetector.serverUrl)
+                    ? "http://127.0.0.1:8765/detections"
+                    : camDetector.serverUrl.Trim();
+
+                float reqTime = Time.realtimeSinceStartup;
+                using (UnityWebRequest req = UnityWebRequest.Get(primaryUrl))
+                {
+                    req.timeout = 3;
+                    yield return req.SendWebRequest();
+                    if (req.result == UnityWebRequest.Result.Success)
+                    {
+                        camDetector.IngestRawDetectionJson(req.downloadHandler.text, reqTime);
+                    }
+                }
+
+                if (head != null && camDetector.TryGetVisibleObjects(head, maxCount, out List<RealWorldObjectDetector.VisibleObjectItem> items))
+                {
+                    AnnounceVisibleObjects(items, head);
+                    yield break;
+                }
+            }
+
+            if (head != null)
+            {
+                FallbackSceneVisibleObjectsIdentification(head, maxCount);
+            }
+        }
+
+        private void FallbackSceneVisibleObjectsIdentification(Transform head, int maxCount)
+        {
+            TrackableObject[] all = FindObjectsOfType<TrackableObject>();
+            List<RealWorldObjectDetector.VisibleObjectItem> sceneItems = new List<RealWorldObjectDetector.VisibleObjectItem>();
+            HashSet<string> seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+
+            List<KeyValuePair<TrackableObject, float>> candidates = new List<KeyValuePair<TrackableObject, float>>();
+            foreach (var t in all)
+            {
+                if (t == null || !t.gameObject.activeInHierarchy)
+                    continue;
+                Vector3 toObj = t.transform.position - head.position;
+                float dist = toObj.magnitude;
+                if (dist < 0.2f || dist > maxGazeDistance)
+                    continue;
+
+                float angle = Vector3.Angle(head.forward, toObj);
+                if (angle <= 48f)
+                {
+                    candidates.Add(new KeyValuePair<TrackableObject, float>(t, angle));
+                }
+            }
+
+            candidates.Sort((a, b) => a.Value.CompareTo(b.Value));
+
+            foreach (var pair in candidates)
+            {
+                if (sceneItems.Count >= maxCount)
+                    break;
+                TrackableObject t = pair.Key;
+                string label = RealWorldObjectDetector.ToIndonesianLabel(t.labelName);
+                if (seen.Contains(label))
+                    continue;
+
+                float dist = Vector3.Distance(head.position, t.transform.position);
+                string dir = PriorityAudioManager.GetRelativeBodyDirection(head, t.transform.position);
+                sceneItems.Add(new RealWorldObjectDetector.VisibleObjectItem
+                {
+                    marker = t,
+                    label = label,
+                    position = t.transform.position,
+                    distance = dist,
+                    direction = dir,
+                    detailedDescription = t.detailedDescription
+                });
+                seen.Add(label);
+            }
+
+            if (sceneItems.Count > 0)
+            {
+                AnnounceVisibleObjects(sceneItems, head);
+            }
+            else
+            {
+                RealWorldObjectDetector det = FindObjectOfType<RealWorldObjectDetector>();
+                PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
+                if (det == null || !det.isServerConnected)
+                {
+                    PriorityAudioManager.Instance.EnqueueSpeech(
+                        "Kamera AI tidak terhubung",
+                        AudioPriority.P3_ObjectIdentity
+                    );
+                }
+                else
+                {
+                    PriorityAudioManager.Instance.EnqueueSpeech(
+                        "Tidak ada benda terdeteksi di depan",
+                        AudioPriority.P3_ObjectIdentity
+                    );
+                }
+            }
+        }
+
+        private void AnnounceVisibleObjects(List<RealWorldObjectDetector.VisibleObjectItem> items, Transform head)
+        {
+            if (items == null || items.Count == 0)
+                return;
+
+            foreach (var it in items)
+            {
+                if (it.marker != null)
+                {
+                    it.marker.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 3.5f);
+                }
+                else
+                {
+                    SpawnTemporaryRealWorldHighlightBox(it.position, TrackableObject.HighContrastYellow, 3.5f);
+                }
+            }
+
+            string shortMsg;
+            string detailMsg;
+
+            if (items.Count == 1)
+            {
+                string d = PriorityAudioManager.FormatDistance(items[0].distance);
+                shortMsg = $"Terlihat 1 benda: {items[0].label}, {d}, {items[0].direction}";
+                detailMsg = $"{items[0].label}, {d}, {items[0].direction}. {items[0].detailedDescription}";
+            }
+            else if (items.Count == 2)
+            {
+                shortMsg = $"Terlihat 2 benda: {items[0].label} {items[0].direction}, dan {items[1].label} {items[1].direction}";
+                string d0 = PriorityAudioManager.FormatDistance(items[0].distance);
+                string d1 = PriorityAudioManager.FormatDistance(items[1].distance);
+                detailMsg = $"Terlihat 2 benda: {items[0].label} {d0} {items[0].direction}, dan {items[1].label} {d1} {items[1].direction}";
+            }
+            else
+            {
+                shortMsg = $"Terlihat 3 benda: {items[0].label} {items[0].direction}, {items[1].label} {items[1].direction}, dan {items[2].label} {items[2].direction}";
+                string d0 = PriorityAudioManager.FormatDistance(items[0].distance);
+                string d1 = PriorityAudioManager.FormatDistance(items[1].distance);
+                string d2 = PriorityAudioManager.FormatDistance(items[2].distance);
+                detailMsg = $"Terlihat 3 benda: {items[0].label} {d0} {items[0].direction}, {items[1].label} {d1} {items[1].direction}, dan {items[2].label} {d2} {items[2].direction}";
+            }
+
+            Vector3 primaryPos = items[0].position;
+            PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, primaryPos);
+            PriorityAudioManager.Instance.EnqueueSpeech(
+                shortMsg,
+                AudioPriority.P3_ObjectIdentity,
+                primaryPos,
+                detailMsg
+            );
+        }
+
+        /// <summary>
         /// Selects the best target for "What is this?":
         ///   1. Never reports SemanticObjectCategory.Person (so a user's own hand/arm or nearby person never blocks objects).
         ///   2. Prioritizes EverydayObject / custom saved objects first, then HazardObstacle objects (chair, table, door),
