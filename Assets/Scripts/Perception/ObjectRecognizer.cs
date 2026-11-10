@@ -29,27 +29,8 @@ namespace ByYourSight.Perception
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _lastPersonSampleTime = new Dictionary<TrackableObject, float>();
 
-        [System.Serializable]
-        private class SavedSpatialAnchorData
-        {
-            public string label;
-            public float x;
-            public float y;
-            public float z;
-        }
-
-        [System.Serializable]
-        private class SavedSpatialAnchorCollection
-        {
-            public List<SavedSpatialAnchorData> anchors = new List<SavedSpatialAnchorData>();
-        }
-
-        private static string SavedAnchorsFilePath =>
-            Path.Combine(Application.persistentDataPath, "saved_spatial_anchors.json");
-
         private void Start()
         {
-            LoadSavedAnchorsFromDisk();
         }
 
         private void Update()
@@ -157,8 +138,8 @@ namespace ByYourSight.Perception
                     if (t.category == SemanticObjectCategory.Person)
                         continue;
 
-                    // Priority 0 = EverydayObject or custom saved item; Priority 1 = larger furniture/hazard obstacle
-                    int priority = (t.isCustomUserSaved || t.category == SemanticObjectCategory.EverydayObject) ? 0 : 1;
+                    // Priority 0 = EverydayObject; Priority 1 = larger furniture/hazard obstacle
+                    int priority = (t.category == SemanticObjectCategory.EverydayObject) ? 0 : 1;
                     float dist = h.distance > 0.01f ? h.distance : Vector3.Distance(head.position, t.transform.position);
 
                     if (priority < bestObjectPriority || (priority == bestObjectPriority && dist < bestObjectDist))
@@ -200,7 +181,7 @@ namespace ByYourSight.Perception
                 float angle = Vector3.Angle(head.forward, toObj);
                 if (angle <= 42f)
                 {
-                    int priority = (t.isCustomUserSaved || t.category == SemanticObjectCategory.EverydayObject) ? 0 : 1;
+                    int priority = (t.category == SemanticObjectCategory.EverydayObject) ? 0 : 1;
                     float score = priority * 100f + angle;
                     if (score < bestAngleScore)
                     {
@@ -247,223 +228,6 @@ namespace ByYourSight.Perception
         {
             RealWorldObjectDetector camDetector = FindObjectOfType<RealWorldObjectDetector>();
             return camDetector != null && camDetector.isServerConnected && camDetector.GetMostCentralActiveDetection(4.0f) != null;
-        }
-
-        /// <summary>
-        /// KF02: Captures/saves the real-world object in front of the user with a custom voice label
-        /// and anchors a 3D wireframe bounding box at its real-world 3D position.
-        /// Triggered when the user says "Simpan [label]" / "Save object [label]".
-        /// </summary>
-        public void SaveCustomObjectInGaze(string customLabel)
-        {
-            if (Camera.main == null || PriorityAudioManager.Instance == null)
-                return;
-
-            Transform head = Camera.main.transform;
-            Ray gazeRay = new Ray(head.position, head.forward);
-            string finalLabel = string.IsNullOrWhiteSpace(customLabel)
-                ? "Benda tersimpan"
-                : RealWorldObjectDetector.ToIndonesianLabel(customLabel.Trim());
-
-            if (Physics.SphereCast(gazeRay, gazeSphereRadius, out RaycastHit hit, maxGazeDistance))
-            {
-                TrackableObject trackable = hit.collider.GetComponentInParent<TrackableObject>();
-                // Relabel simulated objects, but never overwrite another real-room tag or a camera-detected object
-                if (trackable != null && !IsRealWorldAnchor(trackable) && !RealWorldObjectDetector.IsDetectionMarker(trackable))
-                {
-                    trackable.labelName = finalLabel;
-                    trackable.detailedDescription = $"Benda pribadi disimpan dengan nama {finalLabel}";
-                    trackable.isCustomUserSaved = true;
-                    trackable.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 4.0f);
-
-                    PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
-                    PriorityAudioManager.Instance.EnqueueSpeech(
-                        $"Tersimpan, {trackable.labelName}",
-                        AudioPriority.P3_ObjectIdentity,
-                        hit.point
-                    );
-                    return;
-                }
-
-                // Hit real-world Spatial Mesh: spawn a real-world 3D bounding box anchor at hit.point!
-                TrackableObject anchored = CreateRealWorldSpatialAnchor(hit.point, finalLabel);
-                anchored.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 4.0f);
-
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, hit.point);
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Tersimpan, {anchored.labelName}",
-                    AudioPriority.P3_ObjectIdentity,
-                    hit.point
-                );
-            }
-            else
-            {
-                // Even if Spatial Mesh hasn't meshed a small tabletop object yet, anchor at 1.2m along real head gaze!
-                Vector3 realWorldAnchorPos = head.position + head.forward * 1.2f;
-                TrackableObject anchored = CreateRealWorldSpatialAnchor(realWorldAnchorPos, finalLabel);
-                anchored.TriggerVisualHighlight(TrackableObject.HighContrastGreen, 4.0f);
-
-                PriorityAudioManager.Instance.PlayEarcon(EarconType.Success, realWorldAnchorPos);
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Tersimpan, {anchored.labelName}, 1 meter di depan",
-                    AudioPriority.P3_ObjectIdentity,
-                    realWorldAnchorPos
-                );
-            }
-        }
-
-        private const string RealWorldAnchorPrefix = "RealWorldAnchor_";
-
-        private static bool IsRealWorldAnchor(TrackableObject t)
-        {
-            return t != null && t.gameObject.name.StartsWith(RealWorldAnchorPrefix);
-        }
-
-        /// <summary>
-        /// Labels of every real-room tag the user has saved (persisted across app restarts).
-        /// </summary>
-        public List<string> GetSavedLabels()
-        {
-            List<string> labels = new List<string>();
-            foreach (TrackableObject t in FindObjectsOfType<TrackableObject>())
-            {
-                if (IsRealWorldAnchor(t) && !labels.Contains(t.labelName))
-                    labels.Add(t.labelName);
-            }
-            return labels;
-        }
-
-        public void ClearSavedAnchors()
-        {
-            foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
-            {
-                if (IsRealWorldAnchor(existing))
-                {
-                    Destroy(existing.gameObject);
-                }
-            }
-
-            try
-            {
-                string path = SavedAnchorsFilePath;
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                    Debug.Log($"[ObjectRecognizer] Cleared persistent anchors file: {path}");
-                }
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning($"[ObjectRecognizer] Failed to delete saved anchors: {ex.Message}");
-            }
-        }
-
-        private void SaveAnchorsToDisk()
-        {
-            try
-            {
-                SavedSpatialAnchorCollection collection = new SavedSpatialAnchorCollection();
-                foreach (TrackableObject t in FindObjectsOfType<TrackableObject>())
-                {
-                    if (IsRealWorldAnchor(t))
-                    {
-                        Vector3 pos = t.transform.position;
-                        collection.anchors.Add(new SavedSpatialAnchorData
-                        {
-                            label = t.labelName,
-                            x = pos.x,
-                            y = pos.y,
-                            z = pos.z
-                        });
-                    }
-                }
-
-                string json = JsonUtility.ToJson(collection, true);
-                File.WriteAllText(SavedAnchorsFilePath, json);
-                Debug.Log($"[ObjectRecognizer] Persisted {collection.anchors.Count} anchor(s) to {SavedAnchorsFilePath}");
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning($"[ObjectRecognizer] Failed to persist anchors: {ex.Message}");
-            }
-        }
-
-        public void LoadSavedAnchorsFromDisk()
-        {
-            try
-            {
-                string path = SavedAnchorsFilePath;
-                if (!File.Exists(path))
-                    return;
-
-                string json = File.ReadAllText(path);
-                SavedSpatialAnchorCollection collection = JsonUtility.FromJson<SavedSpatialAnchorCollection>(json);
-                if (collection == null || collection.anchors == null)
-                    return;
-
-                int loaded = 0;
-                foreach (SavedSpatialAnchorData data in collection.anchors)
-                {
-                    if (string.IsNullOrWhiteSpace(data.label))
-                        continue;
-
-                    Vector3 pos = new Vector3(data.x, data.y, data.z);
-                    CreateRealWorldSpatialAnchor(pos, data.label, persist: false);
-                    loaded++;
-                }
-
-                Debug.Log($"[ObjectRecognizer] Restored {loaded} persistent spatial anchor(s) from disk");
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning($"[ObjectRecognizer] Failed to load saved anchors: {ex.Message}");
-            }
-        }
-
-        private TrackableObject CreateRealWorldSpatialAnchor(Vector3 worldPos, string label, bool persist = true)
-        {
-            string normalizedLabel = RealWorldObjectDetector.ToIndonesianLabel(label);
-
-            // Saving the same label again moves the tag instead of creating a duplicate
-            foreach (TrackableObject existing in FindObjectsOfType<TrackableObject>())
-            {
-                if (IsRealWorldAnchor(existing) &&
-                    string.Equals(RealWorldObjectDetector.ToIndonesianLabel(existing.labelName), normalizedLabel, System.StringComparison.OrdinalIgnoreCase))
-                {
-                    Destroy(existing.gameObject);
-                }
-            }
-
-            GameObject anchorObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            anchorObj.name = RealWorldAnchorPrefix + normalizedLabel;
-            anchorObj.transform.position = worldPos;
-            anchorObj.transform.localScale = new Vector3(0.22f, 0.22f, 0.22f);
-
-            // Make the inner cube nearly transparent so only the thick 3D wireframe bounding box shows in HoloLens
-            Renderer r = anchorObj.GetComponent<Renderer>();
-            if (r != null)
-            {
-                Shader shader = Shader.Find("Sprites/Default");
-                if (shader != null)
-                {
-                    Material m = new Material(shader);
-                    m.color = new Color(0.15f, 1f, 0.35f, 0.15f);
-                    r.sharedMaterial = m;
-                }
-            }
-
-            TrackableObject trackable = anchorObj.AddComponent<TrackableObject>();
-            trackable.labelName = normalizedLabel;
-            trackable.detailedDescription = $"Objek ruangan tersimpan ({normalizedLabel})";
-            trackable.category = SemanticObjectCategory.EverydayObject;
-            trackable.isCustomUserSaved = true;
-
-            if (persist)
-            {
-                SaveAnchorsToDisk();
-            }
-
-            return trackable;
         }
 
         public static void SpawnTemporaryRealWorldHighlightBox(Vector3 worldPos, Color color, float duration)

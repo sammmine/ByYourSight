@@ -239,22 +239,17 @@ Metode ini menjalankan aplikasi di laptop dan melakukan streaming audio-visual s
 
 ---
 
-## 7. Fitur Persepsi & Spatial Anchoring Permanen
+## 7. Fitur Persepsi & Deteksi Rintangan Cerdas
 
-### A. Fitur "Simpan Objek" (*Save Object*) Permanen
-Pengguna dapat menandai benda atau perabot di dunia nyata dan menyimpannya secara permanen:
-1. Tatap objek yang dituju (misal rak, tempat sampah, atau pintu).
-2. Ucapkan perintah suara: **`"Simpan rak"`** / **`"Simpan objek rak"`** (atau *"Simpan pintu"*, *"Simpan tempat sampah"*, maupun dalam Bahasa Inggris *"Save shelf"*).
-3. HoloLens menembakkan raycast LiDAR ke permukaan benda, memunculkan kotak kawat hijau 3D, dan membunyikan earcon konfirmasi (*"Tersimpan, Rak"*).
-4. **Auto-Persist ke Disk:** Posisi 3D objek langsung ditulis ke storage lokal:
-   `Application.persistentDataPath/saved_spatial_anchors.json`.
-5. **Auto-Restore saat Aplikasi Dibuka Kembali:** Saat HoloLens dimatikan dan aplikasi dibuka lagi di lain hari, semua objek yang pernah Anda simpan otomatis dipulihkan kembali ke posisinya!
+### A. Deteksi Objek Real-World Instan (Kamera AI YOLO)
+Sistem langsung mengenali objek di sekitar pengguna menggunakan model AI tanpa perlu disimpan manual:
+* Tatap benda di sekitar (misal kursi, botol, cangkir, meja, laptop, handphone).
+* Ucapkan: **`"Ini apa"`** (atau tekan tombol **`1`**).
+* Sistem langsung menyebutkan identitas benda, jarak, dan arah tubuhnya secara akurat (*"Kursi, 1 meter, di depan"*).
 
-### B. Perintah Pengelolaan Objek Tersimpan:
-* **`"Daftar simpanan"`** (*"List saved"*) : Menyebutkan semua label objek yang sedang tersimpan di ruangan.
-* **`"Hapus semua"`** (*"Clear saved"*) : Menghapus seluruh data anchor objek dari memori dan file disk.
-* **`"Cari [nama]"`** (*"Find [nama]"*) : Mengaktifkan Spatial Audio Beacon untuk menuntun kepala pengguna ke objek tersebut.
-* **`"Antar ke [tujuan]"`** (*"Navigate to [tujuan]"*) : Memandu rute jalan setapak demi setapak ke tujuan.
+### B. Pencarian Objek Langsung (Spatial Audio Beacon)
+* Ucapkan: **`"Cari [nama]"`** (misal *"Cari kursi"*, *"Cari botol"*, *"Cari cangkir"*, *"Cari meja"*).
+* Audio beacon spasial 3D akan berbunyi membimbing arah pandang kepala Anda tepat ke objek tersebut.
 
 ### C. Deteksi Rintangan Cerdas & Anti-Spam
 Modul [`ObstacleDetector.cs`](file:///Users/lanaginting/Documents/by-your-sight/ByYourSight/Assets/Scripts/Safety/ObstacleDetector.cs) dilengkapi mekanisme perlindungan anti-overstimulation:
@@ -267,19 +262,16 @@ Modul [`ObstacleDetector.cs`](file:///Users/lanaginting/Documents/by-your-sight/
 
 ## 8. Kosakata Lengkap Perintah Suara (Bilingual: Bahasa Indonesia + Phonetic + Inggris)
 
-Karena mesin *offline* `KeywordRecognizer` pada HoloLens 2 menggunakan model akustik Bahasa Inggris (`en-US`), sistem ini mendaftarkan **kosakata Bahasa Indonesia beserta ejaan fonetiknya** (mis. *"ini apa"*, *"inny apa"*, *"cari"*, *"chah ree"*, *"simpan"*, *"seem pan"*) dengan tingkat toleransi `ConfidenceLevel.Low`, sekaligus tetap menerima perintah Bahasa Inggris dan tombol pintas *Wizard of Oz* untuk fasilitator pengujian:
+Karena mesin *offline* `KeywordRecognizer` pada HoloLens 2 menggunakan model akustik Bahasa Inggris (`en-US`), sistem ini mendaftarkan **kosakata Bahasa Indonesia beserta ejaan fonetiknya** (mis. *"ini apa"*, *"inny apa"*, *"cari"*, *"chah ree"*) dengan tingkat toleransi `ConfidenceLevel.Low`, sekaligus tetap menerima perintah Bahasa Inggris dan tombol pintas *Wizard of Oz* untuk fasilitator pengujian:
 
 | Perintah Suara (Bahasa Indonesia / Inggris) | Pintasan Keyboard | Kebutuhan Fungsional | Contoh Respon Audio Sistem (Bahasa Indonesia) |
 | :--- | :---: | :--- | :--- |
 | **"Ini apa"** / **"Apa ini"** / *"What is this"* | `1` | KF01: Identifikasi Objek | *"Botol minum, 1 setengah meter, di depan"* |
-| **"Simpan [nama]"** / **"Simpan objek [nama]"** | `2` | KF02: Simpan Benda Permanen | *"Tersimpan, Rak"* (tersimpan ke disk) |
 | **"Cari botol"** / *"Find water bottle"* | `3` | KF03: Spatial Audio Beacon | *"Botol minum, 2 meter, di depan. Putar kepala Anda"* |
 | **"Cari cangkir"** / **"Cari gelas"** | `4` | KF03: Spatial Audio Beacon | *"Cangkir, 2 setengah meter, agak kanan"* |
-| **"Cari rak"** / **"Cari [nama]"** | — | KF03: Cari Objek Tersimpan | Mengaktifkan nada ketukan 3D audio beacon |
+| **"Cari kursi"** / **"Cari [nama]"** | — | KF03: Spatial Audio Beacon | Mengaktifkan nada ketukan 3D audio beacon |
 | **"Antar ke pintu"** / **"Ke pintu"** | `5` | KF05: Navigasi Waypoint | *"Mengantar ke Pintu"* → *"Jalan lurus, 3 meter"* |
 | **"Antar ke meja"** / **"Ke meja"** | `6` | KF05: Navigasi Waypoint | *"Mengantar ke Meja"* → *"Serong kanan, 2 meter"* |
-| **"Daftar simpanan"** / *"List saved"* | — | Pengelolaan Anchor | *"Tersimpan: Rak, Pintu, Tempat sampah"* |
-| **"Hapus semua"** / *"Clear saved"* | — | Pengelolaan Anchor | *"Semua simpanan dihapus"* |
 | **"Ulangi"** / *"Repeat"* | `7` | Kontrol Audio | Mengulangi kalimat informasi terakhir |
 | **"Detail"** / *"Details"* | `8` | Kontrol Audio | Menyebutkan deskripsi lengkap objek |
 | **"Batal"** / **"Berhenti"** / *"Stop"* | `9` | Kontrol Navigasi | *"Panduan dibatalkan"* |

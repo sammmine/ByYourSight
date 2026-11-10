@@ -97,13 +97,13 @@ namespace ByYourSight.Navigation
             List<Transform> route = null;
             string routeName = qIndo;
 
-            // 1. Real room: a place the user tagged with "Simpan [label]" / "Save [label]" (straight-line guidance to that tag)
+            // 1. Check active real-world camera detection (or scene object) matching query
             ObjectRecognizer recognizer = FindObjectOfType<ObjectRecognizer>();
-            TrackableObject savedTag = recognizer != null ? recognizer.FindObjectByName(q) : null;
-            if (savedTag != null)
+            TrackableObject targetObj = recognizer != null ? recognizer.FindObjectByName(q) : null;
+            if (targetObj != null)
             {
-                route = new List<Transform> { savedTag.transform };
-                routeName = RealWorldObjectDetector.ToIndonesianLabel(savedTag.labelName);
+                route = new List<Transform> { targetObj.transform };
+                routeName = RealWorldObjectDetector.ToIndonesianLabel(targetObj.labelName);
             }
             else
             {
@@ -132,7 +132,7 @@ namespace ByYourSight.Navigation
                 }
                 PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"{routeName} belum disimpan. Arahkan pandangan lalu ucapkan Simpan {routeName}",
+                    $"{routeName} tidak ditemukan di sekitar Anda",
                     AudioPriority.P1_Navigation
                 );
                 return;

@@ -41,7 +41,6 @@ namespace ByYourSight.InputSystem
         private float _yaw = 0f;
         private float _pitch = 0f;
         private string _customCommandInput = "Cari Botol minum";
-        private string _customSaveLabel = "Kunci";
         private RealWorldObjectDetector _objectDetector;
 
         // Maps phonetic/variant spoken phrases -> canonical Indonesian command
@@ -94,17 +93,6 @@ namespace ByYourSight.InputSystem
             { "what is this", "ini apa" },
             { "identify", "ini apa" },
 
-            // KF02: "Simpan objek" (uses HUD label if no object specified)
-            { "simpan objek", "simpan objek" },
-            { "simpan benda", "simpan objek" },
-            { "save object", "simpan objek" },
-            { "save item", "simpan objek" },
-
-            // Anchor management: "List saved" & "Clear saved"
-            { "list saved", "daftar simpanan" },
-            { "clear saved", "hapus simpanan" },
-            { "delete saved", "hapus simpanan" },
-
             // Audio control: "Ulangi" & "Detail"
             { "ulangi", "ulangi" },
             { "oo lung ee", "ulangi" },
@@ -149,8 +137,8 @@ namespace ByYourSight.InputSystem
         private KeywordRecognizer _keywordRecognizer;
 #endif
 
-        [Header("Real-Room Tagging (Simpan -> Cari / Antar ke)")]
-        [Tooltip("Labels the user can tag in the real room (supports both Indonesian and English).")]
+        [Header("Real-Room Labels (Cari / Antar ke)")]
+        [Tooltip("Labels the user can search in the real room (supports both Indonesian and English).")]
         public List<string> realWorldTagLabels = new List<string>
         {
             "pintu", "rak", "tempat sampah", "meja", "kursi", "tas", "handphone", "botol", "cangkir", "kunci", "buku", "laptop",
@@ -176,12 +164,10 @@ namespace ByYourSight.InputSystem
             foreach (string item in CoreSpeechObjectTerms)
             {
                 // Indonesian prefixes
-                phrases.Add($"simpan {item}");
                 phrases.Add($"cari {item}");
                 phrases.Add($"antar ke {item}");
 
                 // English fallback prefixes
-                phrases.Add($"save {item}");
                 phrases.Add($"find {item}");
                 phrases.Add($"navigate to {item}");
             }
@@ -313,58 +299,7 @@ namespace ByYourSight.InputSystem
                 return;
             }
 
-            // "Daftar simpanan" / "List saved"
-            if (cmd == "daftar simpanan" || cmd == "list saved")
-            {
-                if (fromMicrophone && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
-                {
-                    objectRecognizer.IdentifyObjectInGaze();
-                    return;
-                }
-                List<string> saved = objectRecognizer != null ? objectRecognizer.GetSavedLabels() : new List<string>();
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    saved.Count == 0 ? "Belum ada objek tersimpan" : "Tersimpan: " + string.Join(", ", saved),
-                    AudioPriority.P3_ObjectIdentity
-                );
-                return;
-            }
-
-            // "Hapus simpanan" / "Clear saved"
-            if (cmd == "hapus simpanan" || cmd == "clear saved" || cmd == "delete saved")
-            {
-                objectRecognizer?.ClearSavedAnchors();
-                PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Semua objek tersimpan dihapus",
-                    AudioPriority.P3_ObjectIdentity
-                );
-                return;
-            }
-
-            // 4. "Simpan [label]" / "Save object [label]" (KF02)
-            if (cmd == "simpan objek" || cmd.StartsWith("simpan") || cmd.StartsWith("seem pan") || cmd.StartsWith("save"))
-            {
-                string label = "";
-                if (cmd != "simpan objek")
-                {
-                    if (cmd.StartsWith("seem pan")) label = trimmed.Substring(8).Trim();
-                    else if (cmd.StartsWith("simpan")) label = trimmed.Substring(6).Trim();
-                    else if (cmd.StartsWith("save")) label = trimmed.Substring(4).Trim();
-
-                    string lowerLabel = label.ToLowerInvariant();
-                    if (lowerLabel.StartsWith("objek")) label = label.Substring(5).Trim();
-                    else if (lowerLabel.StartsWith("benda")) label = label.Substring(5).Trim();
-                    else if (lowerLabel.StartsWith("object")) label = label.Substring(6).Trim();
-                    else if (lowerLabel.StartsWith("item")) label = label.Substring(4).Trim();
-                }
-
-                if (string.IsNullOrEmpty(label))
-                    label = _customSaveLabel;
-
-                objectRecognizer?.SaveCustomObjectInGaze(label);
-                return;
-            }
-
-            // 5. "Cari [nama benda]" / "Find [object name]" (KF03)
+            // 4. "Cari [nama benda]" / "Find [object name]" (KF03)
             if (cmd.StartsWith("cari ") || cmd.StartsWith("chah ree ") || cmd.StartsWith("cha ree ") || cmd.StartsWith("find "))
             {
                 string targetName;
@@ -381,7 +316,7 @@ namespace ByYourSight.InputSystem
                 else if (fromMicrophone && objectRecognizer != null && objectRecognizer.HasActiveCameraObjectInView())
                 {
                     // Windows en-US KeywordRecognizer often misrecognizes spoken Indonesian "ini apa" as "cari [item]".
-                    // If the target item wasn't saved and the user is pointing the camera at a live detected object,
+                    // If the target item wasn't found and the user is pointing the camera at a live detected object,
                     // identify the object in front of them!
                     objectRecognizer.IdentifyObjectInGaze();
                 }
@@ -389,7 +324,7 @@ namespace ByYourSight.InputSystem
                 {
                     PriorityAudioManager.Instance.PlayEarcon(EarconType.Failure);
                     PriorityAudioManager.Instance.EnqueueSpeech(
-                        $"{indoTarget} belum disimpan. Arahkan pandangan lalu ucapkan Simpan {indoTarget}",
+                        $"{indoTarget} tidak ditemukan di sekitar Anda",
                         AudioPriority.P3_ObjectIdentity
                     );
                 }
@@ -430,11 +365,11 @@ namespace ByYourSight.InputSystem
                 return;
             }
 
-            // 9. "Bantuan" / "Help"
+            // 8. "Bantuan" / "Help"
             if (cmd == "bantuan" || cmd == "help")
             {
                 PriorityAudioManager.Instance.EnqueueSpeech(
-                    "Ucapkan: Ini apa, Simpan objek, Cari benda, Antar ke pintu, atau Diam",
+                    "Ucapkan: Ini apa, Cari benda, Antar ke pintu, atau Diam",
                     AudioPriority.P3_ObjectIdentity
                 );
                 return;
@@ -542,7 +477,6 @@ namespace ByYourSight.InputSystem
         {
             // Quick keyboard shortcuts for demo & usability testing (Wizard of Oz backup)
             if (Input.GetKeyDown(KeyCode.Alpha1)) ProcessVoiceCommand("Ini apa");
-            if (Input.GetKeyDown(KeyCode.Alpha2)) ProcessVoiceCommand($"Simpan {_customSaveLabel}");
             if (Input.GetKeyDown(KeyCode.Alpha3)) ProcessVoiceCommand("Cari Botol minum");
             if (Input.GetKeyDown(KeyCode.Alpha4)) ProcessVoiceCommand("Cari Cangkir");
             if (Input.GetKeyDown(KeyCode.Alpha5)) ProcessVoiceCommand("Antar ke Pintu");
@@ -639,12 +573,6 @@ namespace ByYourSight.InputSystem
 
             if (GUILayout.Button("[1] KF01: \"Ini apa?\" (Deteksi Pandangan)"))
                 ProcessVoiceCommand("Ini apa");
-
-            GUILayout.BeginHorizontal();
-            _customSaveLabel = GUILayout.TextField(_customSaveLabel, GUILayout.Width(135));
-            if (GUILayout.Button("[2] KF02: \"Simpan objek\""))
-                ProcessVoiceCommand($"Simpan {_customSaveLabel}");
-            GUILayout.EndHorizontal();
 
             if (GUILayout.Button("[3] KF03: \"Cari Botol minum\" (Beacon)"))
                 ProcessVoiceCommand("Cari Botol minum");

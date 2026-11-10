@@ -165,7 +165,7 @@ namespace ByYourSight.EditorTools
             // Remove floor collider from horizontal obstacle raycasts
             Object.DestroyImmediate(floor.GetComponent<Collider>());
 
-            // 3. Everyday Objects for KF01 ("Ini apa?"), KF02 ("Simpan objek"), & KF03 ("Cari...")
+            // 3. Everyday Objects for KF01 ("Ini apa?") & KF03 ("Cari...")
             // Botol minum di depan pengguna
             CreateTrackablePrimitive(
                 PrimitiveType.Cylinder,
@@ -192,7 +192,7 @@ namespace ByYourSight.EditorTools
                 SemanticObjectCategory.EverydayObject
             );
 
-            // Kotak di kiri (untuk demo KF02 "Simpan objek")
+            // Kotak di kiri
             CreateTrackablePrimitive(
                 PrimitiveType.Cube,
                 "Item_On_Left",

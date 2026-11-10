@@ -19,7 +19,6 @@ namespace ByYourSight.Perception
         public string labelName = "Botol minum";
         public string detailedDescription = "Botol air minum biru di atas meja";
         public SemanticObjectCategory category = SemanticObjectCategory.EverydayObject;
-        public bool isCustomUserSaved = false; // KF02: Disimpan oleh pengguna
 
         [Header("Movement Simulation (For KF08 Approaching Person)")]
         public bool simulateApproachingUser = false;
