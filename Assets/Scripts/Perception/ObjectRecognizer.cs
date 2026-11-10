@@ -49,6 +49,8 @@ namespace ByYourSight.Perception
 
         private void Start()
         {
+            // Reset/hapus data objek tersimpan lama dari testing sebelumnya saat aplikasi dijalankan
+            ClearSavedAnchors();
             LoadSavedAnchorsFromDisk();
         }
 
