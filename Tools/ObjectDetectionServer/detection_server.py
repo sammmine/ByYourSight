@@ -278,8 +278,8 @@ def main():
     threading.Thread(target=grab_frames, args=(source, shared), daemon=True).start()
     threading.Thread(target=run_detection, args=(model, args, shared), daemon=True).start()
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(shared))
-    print(f"[server] Ready. Preview: http://127.0.0.1:{args.port}/   (Ctrl+C to stop)")
+    server = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(shared))
+    print(f"[server] Ready on all interfaces (0.0.0.0:{args.port}). Preview: http://127.0.0.1:{args.port}/   (Ctrl+C to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

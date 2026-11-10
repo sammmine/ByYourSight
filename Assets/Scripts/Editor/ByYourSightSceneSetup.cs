@@ -1,6 +1,11 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using Unity.XR.CoreUtils;
 using UnityEngine;
@@ -13,12 +18,26 @@ using ByYourSight.InputSystem;
 
 namespace ByYourSight.EditorTools
 {
+    public class ByYourSightBuildPreprocessor : IPreprocessBuildWithReport
+    {
+        public int callbackOrder => 0;
+
+        public void OnPreprocessBuild(BuildReport report)
+        {
+            ByYourSightSceneSetup.EnsureUwpCapabilitiesAndServerHostFile();
+        }
+    }
+
     [InitializeOnLoad]
     public static class ByYourSightSceneSetup
     {
         static ByYourSightSceneSetup()
         {
-            EditorApplication.delayCall += AutoSetupIfNeeded;
+            EditorApplication.delayCall += () =>
+            {
+                EnsureUwpCapabilitiesAndServerHostFile();
+                AutoSetupIfNeeded();
+            };
             EditorSceneManager.sceneOpened += (scene, mode) => AutoSetupIfNeeded();
             EditorApplication.playModeStateChanged += state =>
             {
@@ -30,6 +49,57 @@ namespace ByYourSight.EditorTools
                     }
                 }
             };
+        }
+
+        /// <summary>
+        /// Ensures HoloLens 2 UWP builds have local network + internet + sensor capabilities enabled,
+        /// and embeds the build laptop's local IPv4 addresses into Assets/Resources/DetectionServerHosts.txt
+        /// so standalone UWP builds on HoloLens 2 automatically connect to detection_server.py on the laptop
+        /// instead of failing on 127.0.0.1:8765.
+        /// </summary>
+        public static void EnsureUwpCapabilitiesAndServerHostFile()
+        {
+            try
+            {
+                PlayerSettings.WSA.SetCapability(PlayerSettings.WSACapability.InternetClient, true);
+                PlayerSettings.WSA.SetCapability(PlayerSettings.WSACapability.InternetClientServer, true);
+                PlayerSettings.WSA.SetCapability(PlayerSettings.WSACapability.PrivateNetworkClientServer, true);
+                PlayerSettings.WSA.SetCapability(PlayerSettings.WSACapability.Microphone, true);
+                PlayerSettings.WSA.SetCapability(PlayerSettings.WSACapability.SpatialPerception, true);
+                PlayerSettings.WSA.SetCapability(PlayerSettings.WSACapability.WebCam, true);
+
+                List<string> ips = new List<string>();
+                foreach (IPAddress ip in Dns.GetHostEntry(Dns.GetHostName()).AddressList)
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip))
+                    {
+                        string s = ip.ToString();
+                        if (!ips.Contains(s))
+                            ips.Add(s);
+                    }
+                }
+
+                if (ips.Count > 0)
+                {
+                    string resourcesDir = Path.Combine(Application.dataPath, "Resources");
+                    if (!Directory.Exists(resourcesDir))
+                        Directory.CreateDirectory(resourcesDir);
+
+                    string hostFile = Path.Combine(resourcesDir, "DetectionServerHosts.txt");
+                    string newContent = string.Join("\n", ips);
+                    string oldContent = File.Exists(hostFile) ? File.ReadAllText(hostFile) : "";
+                    if (oldContent != newContent)
+                    {
+                        File.WriteAllText(hostFile, newContent);
+                        AssetDatabase.Refresh();
+                        Debug.Log($"[ByYourSight] Embedded laptop IP(s) for HoloLens UWP detection server: {string.Join(", ", ips)}");
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[ByYourSight] Could not auto-update DetectionServerHosts.txt: " + e.Message);
+            }
         }
 
         private static void AutoSetupIfNeeded()

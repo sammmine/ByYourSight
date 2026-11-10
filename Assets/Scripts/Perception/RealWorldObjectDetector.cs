@@ -253,6 +253,8 @@ namespace ByYourSight.Perception
 
         private IEnumerator PollLoop()
         {
+            List<string> candidateUrls = BuildCandidateServerUrls();
+
             while (true)
             {
                 if (!enableDetection)
@@ -290,17 +292,157 @@ namespace ByYourSight.Perception
                     else
                     {
                         isServerConnected = false;
-                        if (!_warnedOffline)
+
+                        // If 127.0.0.1 failed (e.g. running as a standalone UWP build on HoloLens 2 while
+                        // detection_server.py is running on the Windows laptop), probe embedded laptop IPs!
+                        bool foundAlternative = false;
+                        foreach (string altUrl in candidateUrls)
                         {
-                            Debug.LogWarning($"[Detection] Detection server not reachable at {serverUrl} ({req.error}). " +
-                                             "Start Tools/ObjectDetectionServer/detection_server.py on this laptop. Retrying every 3 s.");
-                            _warnedOffline = true;
+                            if (altUrl == serverUrl)
+                                continue;
+
+                            float probeTime = Time.realtimeSinceStartup;
+                            using (UnityWebRequest probe = UnityWebRequest.Get(altUrl))
+                            {
+                                probe.timeout = 1;
+                                yield return probe.SendWebRequest();
+                                if (probe.result == UnityWebRequest.Result.Success)
+                                {
+                                    serverUrl = altUrl;
+                                    isServerConnected = true;
+                                    _warnedOffline = false;
+                                    foundAlternative = true;
+                                    Debug.Log($"[Detection] Auto-discovered laptop detection server at {serverUrl}");
+
+                                    try
+                                    {
+                                        DetectionResponse resp = JsonUtility.FromJson<DetectionResponse>(probe.downloadHandler.text);
+                                        if (resp != null)
+                                            ProcessDetections(resp, probeTime);
+                                    }
+                                    catch { }
+                                    break;
+                                }
+                            }
                         }
-                        yield return new WaitForSeconds(3f);
+
+                        if (!foundAlternative)
+                        {
+                            // Also scan the local /24 Wi-Fi subnet in parallel batches in case the laptop IP changed
+                            yield return StartCoroutine(ScanLocalSubnetForServer());
+                            foundAlternative = isServerConnected;
+                        }
+
+                        if (!foundAlternative)
+                        {
+                            if (!_warnedOffline)
+                            {
+                                Debug.LogWarning($"[Detection] Detection server not reachable at {serverUrl} ({req.error}). " +
+                                                 "Start Tools/ObjectDetectionServer/detection_server.py on this laptop. Retrying every 3 s.");
+                                _warnedOffline = true;
+                            }
+                            yield return new WaitForSeconds(3f);
+                        }
                     }
                 }
 
                 yield return new WaitForSeconds(pollIntervalSeconds);
+            }
+        }
+
+        private List<string> BuildCandidateServerUrls()
+        {
+            List<string> urls = new List<string>();
+            if (!string.IsNullOrWhiteSpace(serverUrl))
+                urls.Add(serverUrl.Trim());
+
+            string localhostUrl = "http://127.0.0.1:8765/detections";
+            if (!urls.Contains(localhostUrl))
+                urls.Add(localhostUrl);
+
+            TextAsset hostsAsset = Resources.Load<TextAsset>("DetectionServerHosts");
+            if (hostsAsset != null && !string.IsNullOrWhiteSpace(hostsAsset.text))
+            {
+                string[] lines = hostsAsset.text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string line in lines)
+                {
+                    string ip = line.Trim();
+                    if (!string.IsNullOrEmpty(ip))
+                    {
+                        string candidate = $"http://{ip}:8765/detections";
+                        if (!urls.Contains(candidate))
+                            urls.Add(candidate);
+                    }
+                }
+            }
+
+            return urls;
+        }
+
+        private IEnumerator ScanLocalSubnetForServer()
+        {
+            List<string> prefixes = new List<string>();
+            try
+            {
+                foreach (var ip in System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName()).AddressList)
+                {
+                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(ip))
+                    {
+                        string[] parts = ip.ToString().Split('.');
+                        if (parts.Length == 4)
+                        {
+                            string prefix = $"{parts[0]}.{parts[1]}.{parts[2]}.";
+                            if (!prefixes.Contains(prefix))
+                                prefixes.Add(prefix);
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            const int batchSize = 32;
+            foreach (string prefix in prefixes)
+            {
+                for (int start = 1; start <= 254 && !isServerConnected; start += batchSize)
+                {
+                    int end = Mathf.Min(254, start + batchSize - 1);
+                    List<UnityWebRequest> batch = new List<UnityWebRequest>(end - start + 1);
+                    for (int host = start; host <= end; host++)
+                    {
+                        string url = $"http://{prefix}{host}:8765/detections";
+                        UnityWebRequest r = UnityWebRequest.Get(url);
+                        r.timeout = 1;
+                        r.SendWebRequest();
+                        batch.Add(r);
+                    }
+
+                    float waitUntil = Time.realtimeSinceStartup + 0.65f;
+                    while (Time.realtimeSinceStartup < waitUntil)
+                    {
+                        bool anyPending = false;
+                        foreach (UnityWebRequest r in batch)
+                        {
+                            if (r.isDone && r.result == UnityWebRequest.Result.Success && !isServerConnected)
+                            {
+                                serverUrl = r.url;
+                                isServerConnected = true;
+                                _warnedOffline = false;
+                                Debug.Log($"[Detection] Subnet scan discovered laptop detection server at {serverUrl}");
+                                break;
+                            }
+                            if (!r.isDone)
+                                anyPending = true;
+                        }
+                        if (isServerConnected || !anyPending)
+                            break;
+                        yield return null;
+                    }
+
+                    foreach (UnityWebRequest r in batch)
+                    {
+                        r.Dispose();
+                    }
+                }
             }
         }
 
