@@ -31,6 +31,20 @@ namespace ByYourSight.Perception
 
         private void Start()
         {
+            // Clean up any legacy saved anchors file from disk on HoloLens 2 / PC storage
+            try
+            {
+                string legacyPath = Path.Combine(Application.persistentDataPath, "saved_spatial_anchors.json");
+                if (File.Exists(legacyPath))
+                {
+                    File.Delete(legacyPath);
+                    Debug.Log($"[ObjectRecognizer] Purged legacy saved spatial anchors file: {legacyPath}");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[ObjectRecognizer] Could not delete legacy anchor file: {ex.Message}");
+            }
         }
 
         private void Update()
