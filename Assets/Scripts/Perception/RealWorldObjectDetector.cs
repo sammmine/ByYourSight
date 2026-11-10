@@ -82,6 +82,9 @@ namespace ByYourSight.Perception
             public bool isPerson;
             public float lastSeen;
             public float lastCenterOffset;
+            public float lastCx = 0.5f;
+            public float lastCy = 0.5f;
+            public float lastEstimatedDistance = 1.2f;
             public int misses;
         }
 
@@ -97,13 +100,15 @@ namespace ByYourSight.Perception
         {
             { "person", "orang" },
             { "orang", "orang" },
-            { "cup", "cangkir" },
+            { "cup", "gelas" },
+            { "wine glass", "gelas" },
+            { "glass", "gelas" },
+            { "gelas", "gelas" },
+            { "guh las", "gelas" },
             { "coffee mug", "cangkir" },
             { "mug", "cangkir" },
-            { "gelas", "cangkir" },
             { "cangkir", "cangkir" },
             { "chung keer", "cangkir" },
-            { "guh las", "cangkir" },
             { "bottle", "botol minum" },
             { "water bottle", "botol minum" },
             { "botol", "botol minum" },
@@ -225,6 +230,9 @@ namespace ByYourSight.Perception
         private readonly List<TrackedDetection> _tracked = new List<TrackedDetection>();
         private DetectionResponse _latestResponse;
         private float _latestResponseWallTime = -100f;
+        private DetectionResponse _latestNonEmptyResponse;
+        private float _latestNonEmptyWallTime = -100f;
+        private float _lastNonEmptyBatchTime = -100f;
         private bool _warnedOffline = false;
         private float _lastFrameStamp = -100f;
         private Material _markerMaterial;
@@ -499,14 +507,18 @@ namespace ByYourSight.Perception
             if (resp == null || resp.detections == null)
                 return;
 
-            if (resp.detections.Length == 0 && resp.age > 30f)
+            _latestResponse = resp;
+            _latestResponseWallTime = requestTime;
+
+            if (resp.detections.Length == 0)
             {
-                lastDetectedLabels = "";
+                if (Time.realtimeSinceStartup - _latestNonEmptyWallTime > 12f)
+                    lastDetectedLabels = "";
                 return;
             }
 
-            _latestResponse = resp;
-            _latestResponseWallTime = requestTime;
+            _latestNonEmptyResponse = resp;
+            _latestNonEmptyWallTime = requestTime;
 
             if (_poseHistory.Count == 0)
             {
@@ -521,21 +533,6 @@ namespace ByYourSight.Perception
 
             float effectiveAge = Mathf.Clamp(resp.age, 0f, 2.0f);
             float frameStamp = requestTime - effectiveAge;
-            if (!forceProcess && Mathf.Abs(frameStamp - _lastFrameStamp) < 0.03f)
-            {
-                foreach (DetectionDto d in resp.detections)
-                {
-                    if (d == null || string.IsNullOrEmpty(d.label) || d.conf < minConfidence)
-                        continue;
-                    string mapped = MapLabel(d.label);
-                    foreach (TrackedDetection existing in _tracked)
-                    {
-                        if (existing != null && existing.label == mapped)
-                            existing.lastSeen = Time.time;
-                    }
-                }
-                return;
-            }
             _lastFrameStamp = frameStamp;
 
             // Head pose at the moment the camera frame was captured
@@ -549,10 +546,13 @@ namespace ByYourSight.Perception
 
             HashSet<TrackedDetection> matched = new HashSet<TrackedDetection>();
             List<string> labels = new List<string>();
+            float confThreshold = Mathf.Min(minConfidence, 0.15f);
+            float batchTime = Time.time;
+            _lastNonEmptyBatchTime = batchTime;
 
             foreach (DetectionDto d in resp.detections)
             {
-                if (d == null || string.IsNullOrEmpty(d.label) || d.conf < minConfidence)
+                if (d == null || string.IsNullOrEmpty(d.label) || d.conf < confThreshold)
                     continue;
 
                 string label = MapLabel(d.label);
@@ -649,7 +649,10 @@ namespace ByYourSight.Perception
                     FaceUser(m, pose.position);
                 }
 
-                t.lastSeen = Time.time;
+                t.lastSeen = batchTime;
+                t.lastCx = d.cx;
+                t.lastCy = d.cy;
+                t.lastEstimatedDistance = distance;
                 t.lastCenterOffset = Vector2.Distance(new Vector2(d.cx, d.cy), new Vector2(0.5f, 0.5f));
                 t.misses = 0;
                 t.marker.detailedDescription = $"{Capitalize(label)} terdeteksi kamera, keyakinan {Mathf.RoundToInt(d.conf * 100f)} persen";
@@ -657,7 +660,8 @@ namespace ByYourSight.Perception
                 if (!labels.Contains(label)) labels.Add(label);
             }
 
-            lastDetectedLabels = string.Join(", ", labels);
+            if (labels.Count > 0)
+                lastDetectedLabels = string.Join(", ", labels);
 
             if (!forceProcess)
             {
@@ -680,16 +684,32 @@ namespace ByYourSight.Perception
             }
         }
 
+        private static bool IsGenericTableLabel(string label)
+        {
+            if (string.IsNullOrEmpty(label))
+                return false;
+            return string.Equals(label, "meja", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(label, "meja kerja", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(label, "table", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(label, "dining table", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(label, "desk", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>
         /// Returns the most central non-person object actively detected on the camera stream (http://127.0.0.1:8765)
-        /// within the last maxAgeSeconds. Prioritizes everyday handheld objects (phone, bottle, cup, book, laptop, TV, etc.)
-        /// closest to the center of the camera frame (cx=0.5, cy=0.5).
+        /// within the last maxAgeSeconds. Prioritizes specific objects (kursi, buku, gelas, cangkir, botol, laptop, TV)
+        /// over generic tables (meja), and picks the object closest to the center of the camera frame (cx=0.5, cy=0.5).
         /// </summary>
         public TrackableObject GetMostCentralActiveDetection(float maxAgeSeconds = 20.0f)
         {
-            if (_latestResponse != null && (Time.realtimeSinceStartup - _latestResponseWallTime) <= maxAgeSeconds)
+            DetectionResponse activeResp = (_latestResponse != null && _latestResponse.detections != null && _latestResponse.detections.Length > 0)
+                ? _latestResponse
+                : _latestNonEmptyResponse;
+            float activeWallTime = (activeResp == _latestResponse) ? _latestResponseWallTime : _latestNonEmptyWallTime;
+
+            if (activeResp != null && (Time.realtimeSinceStartup - activeWallTime) <= maxAgeSeconds)
             {
-                ProcessDetections(_latestResponse, _latestResponseWallTime, forceProcess: true);
+                ProcessDetections(activeResp, activeWallTime, forceProcess: true);
             }
 
             TrackableObject best = null;
@@ -703,9 +723,10 @@ namespace ByYourSight.Perception
                 if (now - t.lastSeen > maxAgeSeconds)
                     continue;
 
-                // Prioritize EverydayObject (0) over background furniture/HazardObstacle (1), then camera center closeness
-                int catPriority = t.marker.category == SemanticObjectCategory.EverydayObject ? 0 : 1;
-                float score = catPriority * 10f + t.lastCenterOffset;
+                bool inLatestBatch = Mathf.Abs(t.lastSeen - _lastNonEmptyBatchTime) <= 0.75f;
+                int batchPrio = inLatestBatch ? 0 : 1;
+                int tablePrio = IsGenericTableLabel(t.label) ? 1 : 0;
+                float score = batchPrio * 100f + tablePrio * 10f + t.lastCenterOffset;
                 if (score < bestScore)
                 {
                     bestScore = score;
@@ -718,8 +739,9 @@ namespace ByYourSight.Perception
 
         /// <summary>
         /// Directly resolves the best live camera detection for KF01 ("Ini apa?").
-        /// Prioritizes EverydayObjects (cup, laptop, TV, bottle, phone) over furniture (table/desk),
-        /// and combines two tabletop EverydayObjects (e.g. "Laptop dan Cangkir") when both are present.
+        /// Prioritizes objects in the current camera frame, ranks specific objects (kursi, buku, gelas, cangkir,
+        /// botol minum, laptop, televisi, handphone) above generic tables (meja), and picks the object closest
+        /// to the center of the camera frame.
         /// </summary>
         public bool TryGetBestLiveDetection(
             Transform head,
@@ -736,17 +758,24 @@ namespace ByYourSight.Perception
             distanceMeters = 0f;
             detailedDescription = "";
 
-            if (_latestResponse != null && (Time.realtimeSinceStartup - _latestResponseWallTime) <= maxAgeSeconds)
+            DetectionResponse activeResp = (_latestResponse != null && _latestResponse.detections != null && _latestResponse.detections.Length > 0)
+                ? _latestResponse
+                : _latestNonEmptyResponse;
+            float activeWallTime = (activeResp == _latestResponse) ? _latestResponseWallTime : _latestNonEmptyWallTime;
+
+            if (activeResp != null && (Time.realtimeSinceStartup - activeWallTime) <= maxAgeSeconds)
             {
-                ProcessDetections(_latestResponse, _latestResponseWallTime, forceProcess: true);
+                ProcessDetections(activeResp, activeWallTime, forceProcess: true);
             }
 
             float now = Time.time;
             Transform cam = head != null ? head : GetCameraTransform();
             Vector3 headPos = cam != null ? cam.position : Vector3.zero;
-            Vector3 headFwd = cam != null ? cam.forward : Vector3.forward;
+            Quaternion headRot = cam != null ? cam.rotation : Quaternion.identity;
 
-            List<TrackedDetection> candidates = new List<TrackedDetection>();
+            List<TrackedDetection> latestBatchCandidates = new List<TrackedDetection>();
+            List<TrackedDetection> allCandidates = new List<TrackedDetection>();
+
             foreach (TrackedDetection t in _tracked)
             {
                 if (t == null || t.isPerson || t.marker == null)
@@ -755,68 +784,46 @@ namespace ByYourSight.Perception
                 if (age > maxAgeSeconds)
                     continue;
 
-                float angle = Vector3.Angle(headFwd, t.marker.transform.position - headPos);
-                bool inLiveFrame = age <= 3.5f;
-                // Ignore objects from an older view direction if the user has turned their head away (> 48 degrees)
-                if (!inLiveFrame && angle > 48f)
-                    continue;
-
-                candidates.Add(t);
+                allCandidates.Add(t);
+                if (Mathf.Abs(t.lastSeen - _lastNonEmptyBatchTime) <= 0.75f && age <= 15.0f)
+                {
+                    latestBatchCandidates.Add(t);
+                }
             }
 
+            List<TrackedDetection> candidates = latestBatchCandidates.Count > 0 ? latestBatchCandidates : allCandidates;
             if (candidates.Count == 0)
                 return false;
 
             candidates.Sort((a, b) =>
             {
-                int prioA = a.marker.category == SemanticObjectCategory.EverydayObject ? 0 : 1;
-                int prioB = b.marker.category == SemanticObjectCategory.EverydayObject ? 0 : 1;
-                if (prioA != prioB)
-                    return prioA.CompareTo(prioB);
+                // Specific objects (kursi, buku, gelas, cangkir, botol minum, laptop, televisi, etc.) always beat generic table ("meja")
+                int tableA = IsGenericTableLabel(a.label) ? 1 : 0;
+                int tableB = IsGenericTableLabel(b.label) ? 1 : 0;
+                if (tableA != tableB)
+                    return tableA.CompareTo(tableB);
 
-                float angleA = Vector3.Angle(headFwd, a.marker.transform.position - headPos);
-                float angleB = Vector3.Angle(headFwd, b.marker.transform.position - headPos);
-                float scoreA = (now - a.lastSeen <= 3.5f) ? a.lastCenterOffset * 30f : angleA;
-                float scoreB = (now - b.lastSeen <= 3.5f) ? b.lastCenterOffset * 30f : angleB;
-                return scoreA.CompareTo(scoreB);
+                // Next, prefer the object closest to the center of the camera frame (cx=0.5, cy=0.5)
+                return a.lastCenterOffset.CompareTo(b.lastCenterOffset);
             });
 
             TrackedDetection best = candidates[0];
             bestMarker = best.marker;
-            targetPoint = best.marker.transform.position;
-            distanceMeters = Mathf.Clamp(Vector3.Distance(headPos, targetPoint), 0.4f, maxDetectionDistance);
+
+            float tanH = Mathf.Tan(cameraHorizontalFov * 0.5f * Mathf.Deg2Rad);
+            float tanV = tanH * (9f / 16f);
+            Vector3 localDir = new Vector3((best.lastCx - 0.5f) * 2f * tanH, -(best.lastCy - 0.5f) * 2f * tanV, 1f).normalized;
+            Vector3 worldDir = headRot * localDir;
+
+            distanceMeters = Mathf.Clamp(
+                best.lastEstimatedDistance > 0.1f ? best.lastEstimatedDistance : Vector3.Distance(headPos, best.marker.transform.position),
+                0.5f,
+                maxDetectionDistance
+            );
+            targetPoint = headPos + worldDir * distanceMeters;
+            best.marker.transform.position = targetPoint;
             detailedDescription = best.marker.detailedDescription;
-
-            string primaryLabel = ToIndonesianLabel(best.label);
-            string secondaryLabel = null;
-
-            // Combine tabletop everyday objects (e.g. "Laptop dan Cangkir") when both are in view
-            if (best.marker.category == SemanticObjectCategory.EverydayObject &&
-                !string.Equals(primaryLabel, "Televisi", StringComparison.OrdinalIgnoreCase))
-            {
-                for (int i = 1; i < candidates.Count; i++)
-                {
-                    TrackedDetection other = candidates[i];
-                    if (other.marker.category != SemanticObjectCategory.EverydayObject)
-                        continue;
-                    if (now - other.lastSeen > 12.0f)
-                        continue;
-
-                    string candidateName = ToIndonesianLabel(other.label);
-                    if (string.Equals(candidateName, "Televisi", StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    if (!string.Equals(candidateName, primaryLabel, StringComparison.OrdinalIgnoreCase))
-                    {
-                        secondaryLabel = candidateName;
-                        break;
-                    }
-                }
-            }
-
-            indonesianLabel = string.IsNullOrEmpty(secondaryLabel)
-                ? primaryLabel
-                : $"{primaryLabel} dan {secondaryLabel}";
+            indonesianLabel = ToIndonesianLabel(best.label);
 
             return true;
         }

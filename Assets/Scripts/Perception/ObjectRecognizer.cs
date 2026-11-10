@@ -154,9 +154,13 @@ namespace ByYourSight.Perception
                 }
                 else
                 {
-                    string surfaceDesc = SurfaceClassifier.Describe(hit, head);
-                    // On "Ini apa?", a horizontal surface at waist/desk height is a table/desk ("Meja"), not "Rintangan rendah"
-                    objName = surfaceDesc == SurfaceClassifier.LowObstacle ? "Meja" : surfaceDesc;
+                    // No camera detection: say so honestly instead of guessing "Meja"/"Dinding" from the Spatial Mesh,
+                    // so the tester (and developer) can tell whether the camera AI is connected and seeing anything.
+                    RealWorldObjectDetector det = FindObjectOfType<RealWorldObjectDetector>();
+                    if (det == null || !det.isServerConnected)
+                        objName = "Kamera AI tidak terhubung";
+                    else
+                        objName = "Kamera belum mengenali benda";
                 }
 
                 string detail = trackable != null ? trackable.detailedDescription : "";
@@ -385,7 +389,11 @@ namespace ByYourSight.Perception
                 string objRaw = obj.labelName.ToLowerInvariant();
                 string objIndo = RealWorldObjectDetector.ToIndonesianLabel(obj.labelName).ToLowerInvariant();
 
-                bool match = objRaw.Contains(qRaw) || qRaw.Contains(objRaw) ||
+                bool isCupGlassSynonym =
+                    ((qIndo == "gelas" || qIndo == "cangkir") && (objIndo == "gelas" || objIndo == "cangkir"));
+
+                bool match = isCupGlassSynonym ||
+                             objRaw.Contains(qRaw) || qRaw.Contains(objRaw) ||
                              objIndo.Contains(qIndo) || qIndo.Contains(objIndo);
 
                 if (match)
@@ -442,8 +450,8 @@ namespace ByYourSight.Perception
                 if (_previousPersonDistance.TryGetValue(obj, out float peakDist))
                 {
                     bool isCameraPerson = RealWorldObjectDetector.IsDetectionMarker(obj);
-                    bool approachedFromPeak = (peakDist - currentDist) >= 0.10f;
-                    bool enteredCloseZone = isCameraPerson && currentDist <= 2.6f && (Time.time - firstSeen) >= 0.35f;
+                    bool approachedFromPeak = (peakDist - currentDist) >= 0.08f;
+                    bool enteredCloseZone = isCameraPerson && currentDist <= 3.2f && !_lastPersonAlertTime.ContainsKey(obj);
 
                     if (currentDist <= effectiveRadius && (approachedFromPeak || enteredCloseZone))
                     {

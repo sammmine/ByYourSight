@@ -22,11 +22,8 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Low-latency FFmpeg options + 3-second read/socket timeout so stream auto-reconnects when Holographic Remoting starts
-os.environ.setdefault(
-    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "fflags;nobuffer|flags;low_delay|timeout;3000000|rw_timeout;3000000|stimeout;3000000"
-)
+# Low-latency FFmpeg options for Device Portal live stream
+os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;low_delay")
 
 import cv2  # noqa: E402
 from ultralytics import YOLO  # noqa: E402
@@ -60,7 +57,8 @@ def build_source(args):
     if args.source is not None:
         return int(args.source) if args.source.isdigit() else args.source
     if not args.portal:
-        raise SystemExit("Give --portal https://<hololens-ip> (with --user/--password) or --source 0 for a webcam.")
+        print("[stream] No --portal or --source given; defaulting to laptop webcam (--source 0)")
+        return 0
     parsed = urllib.parse.urlparse(args.portal if "://" in args.portal else "https://" + args.portal)
     netloc = parsed.netloc
     if args.user:
@@ -90,6 +88,8 @@ class Shared:
         self.stream_status = "starting"
         self.result = {"age": 0.0, "width": 0, "height": 0, "detections": []}
         self.result_frame_time = 0.0
+        self.last_nonempty_detections = []
+        self.last_nonempty_time = 0.0
         self.preview_jpeg = None
         self.inference_ms = 0.0
         self.inference_fps = 0.0
@@ -97,40 +97,54 @@ class Shared:
 
 
 def grab_frames(source, shared):
-    """Reads the stream continuously so the newest frame is always available (no buffered lag)."""
+    """Reads the stream continuously so the newest frame is always available (no buffered lag).
+    If a HoloLens Device Portal stream is blocked because Holographic Remoting Player is active,
+    automatically falls back to the laptop webcam (0) so Unity Play Mode continues detecting live objects."""
+    active_source = source
     while not shared.stop.is_set():
-        if isinstance(source, int):
-            cap = cv2.VideoCapture(source)
-        else:
-            try:
-                cap = cv2.VideoCapture(
-                    source,
-                    cv2.CAP_FFMPEG,
-                    [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3500, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3500],
-                )
-            except Exception:
-                cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        cap = cv2.VideoCapture(active_source) if isinstance(active_source, int) else cv2.VideoCapture(active_source, cv2.CAP_FFMPEG)
 
         if not cap.isOpened():
+            if not isinstance(active_source, int):
+                print(
+                    "[stream] Cannot open HoloLens stream",
+                    redact(active_source),
+                    "(Holographic Remoting locks Device Portal camera) -> switching to laptop webcam (0)!",
+                )
+                active_source = 0
+                with shared.lock:
+                    shared.stream_status = "switching to webcam 0 (HoloLens camera in use by Remoting)"
+                time.sleep(0.5)
+                continue
+
             with shared.lock:
-                shared.stream_status = "cannot open camera stream (check IP, Device Portal login, Wi-Fi)"
-            print("[stream] Cannot open", redact(source), "- retrying in 2 s")
+                shared.stream_status = "cannot open camera stream (check webcam / Device Portal)"
+            print("[stream] Cannot open", redact(active_source), "- retrying in 2 s")
             time.sleep(2)
             continue
 
-        print("[stream] Connected to", redact(source))
+        label = redact(active_source)
+        if active_source == 0 and not isinstance(source, int):
+            label = "webcam 0 (auto-fallback: Holographic Remoting active)"
+        print("[stream] Connected to", label)
         with shared.lock:
-            shared.stream_status = "ok"
+            shared.stream_status = f"ok ({label})"
+
+        frames_this_session = 0
         while not shared.stop.is_set():
             ok, frame = cap.read()
             if not ok:
                 break
+            frames_this_session += 1
             with shared.lock:
                 shared.frame = frame
                 shared.frame_time = time.time()
                 shared.frames_read += 1
 
         cap.release()
+        if not isinstance(active_source, int) and frames_this_session == 0:
+            print("[stream] HoloLens stream returned 0 frames (Holographic Remoting active) -> switching to laptop webcam (0)!")
+            active_source = 0
         with shared.lock:
             shared.stream_status = "stream ended, reconnecting"
         print("[stream] Stream ended - reconnecting")
@@ -174,10 +188,20 @@ def detect_frame(model, args, shared, frame, frame_time):
             "h": round((y2 - y1) / h, 4),
         })
 
+    now = time.time()
     ok, jpeg = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 70])
     with shared.lock:
-        shared.result = {"width": w, "height": h, "detections": detections}
-        shared.result_frame_time = time.time()
+        if len(detections) > 0:
+            shared.last_nonempty_detections = detections
+            shared.last_nonempty_time = now
+            active_detections = detections
+        elif (now - shared.last_nonempty_time) <= 5.0 and len(shared.last_nonempty_detections) > 0:
+            active_detections = shared.last_nonempty_detections
+        else:
+            active_detections = []
+
+        shared.result = {"width": w, "height": h, "detections": active_detections}
+        shared.result_frame_time = now
         shared.inference_ms = elapsed * 1000
         shared.inference_fps = 0.8 * shared.inference_fps + 0.2 * (1.0 / max(elapsed, 1e-3))
         if ok:
