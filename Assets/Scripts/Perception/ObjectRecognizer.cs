@@ -29,6 +29,7 @@ namespace ByYourSight.Perception
 
         private readonly Dictionary<TrackableObject, float> _lastPersonAlertTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
+        private readonly Dictionary<TrackableObject, float> _firstPersonSeenTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _lastPersonSampleTime = new Dictionary<TrackableObject, float>();
 
         private void Start()
@@ -115,7 +116,7 @@ namespace ByYourSight.Perception
                 float reqTime = Time.realtimeSinceStartup;
                 using (UnityWebRequest req = UnityWebRequest.Get(primaryUrl))
                 {
-                    req.timeout = 1;
+                    req.timeout = 3;
                     yield return req.SendWebRequest();
                     if (req.result == UnityWebRequest.Result.Success)
                     {
@@ -407,33 +408,50 @@ namespace ByYourSight.Perception
         /// </summary>
         private void MonitorApproachingPeople()
         {
-            if (Camera.main == null || PriorityAudioManager.Instance == null)
+            if (PriorityAudioManager.Instance == null)
                 return;
 
-            Transform head = Camera.main.transform;
+            Camera activeCam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+            if (activeCam == null)
+                return;
+
+            Transform head = activeCam.transform;
             TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
+            float effectiveRadius = Mathf.Max(personDetectionRadius, 3.5f);
 
             foreach (var obj in allObjects)
             {
-                if (obj.category != SemanticObjectCategory.Person)
+                if (obj == null || obj.category != SemanticObjectCategory.Person)
                     continue;
 
-                // Sample every 0.5 s: camera-estimated distances jitter, so require a real approach (~0.4 m/s)
                 float lastSample = _lastPersonSampleTime.TryGetValue(obj, out float ls) ? ls : -999f;
-                if (Time.time - lastSample < 0.5f)
+                if (Time.time - lastSample < 0.25f)
                     continue;
                 _lastPersonSampleTime[obj] = Time.time;
 
                 float currentDist = Vector3.Distance(head.position, obj.transform.position);
-                if (_previousPersonDistance.TryGetValue(obj, out float prevDist))
+                if (currentDist < 0.45f)
+                    continue;
+
+                if (!_firstPersonSeenTime.TryGetValue(obj, out float firstSeen))
                 {
-                    bool isGettingCloser = (prevDist - currentDist) > 0.2f;
-                    if (currentDist <= personDetectionRadius && isGettingCloser)
+                    firstSeen = Time.time;
+                    _firstPersonSeenTime[obj] = firstSeen;
+                }
+
+                if (_previousPersonDistance.TryGetValue(obj, out float peakDist))
+                {
+                    bool isCameraPerson = RealWorldObjectDetector.IsDetectionMarker(obj);
+                    bool approachedFromPeak = (peakDist - currentDist) >= 0.10f;
+                    bool enteredCloseZone = isCameraPerson && currentDist <= 2.6f && (Time.time - firstSeen) >= 0.35f;
+
+                    if (currentDist <= effectiveRadius && (approachedFromPeak || enteredCloseZone))
                     {
                         float lastAlert = _lastPersonAlertTime.TryGetValue(obj, out float t) ? t : -999f;
                         if (Time.time - lastAlert >= personAlertCooldown)
                         {
                             _lastPersonAlertTime[obj] = Time.time;
+                            _previousPersonDistance[obj] = currentDist;
                             string dir = PriorityAudioManager.GetRelativeBodyDirection(head, obj.transform.position);
                             obj.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 2.5f);
 
@@ -442,11 +460,18 @@ namespace ByYourSight.Perception
                                 AudioPriority.P2_SocialInfo,
                                 obj.transform.position
                             );
+                            continue;
                         }
                     }
-                }
 
-                _previousPersonDistance[obj] = currentDist;
+                    // Keep the peak distance since last alert so gradual walking speeds accumulate properly
+                    if (currentDist > peakDist)
+                        _previousPersonDistance[obj] = currentDist;
+                }
+                else
+                {
+                    _previousPersonDistance[obj] = currentDist;
+                }
             }
         }
     }
