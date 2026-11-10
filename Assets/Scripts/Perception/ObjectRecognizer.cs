@@ -42,6 +42,7 @@ namespace ByYourSight.Perception
 
         private readonly Dictionary<TrackableObject, float> _lastPersonAlertTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
+        private readonly Dictionary<TrackableObject, float> _firstPersonSeenTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _lastPersonSampleTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, int> _personApproachStreak = new Dictionary<TrackableObject, int>();
         private float _lastPersonSpeechTime = -999f;
@@ -141,7 +142,7 @@ namespace ByYourSight.Perception
                 float reqTime = Time.realtimeSinceStartup;
                 using (UnityWebRequest req = UnityWebRequest.Get(primaryUrl))
                 {
-                    req.timeout = 1;
+                    req.timeout = 3;
                     yield return req.SendWebRequest();
                     if (req.result == UnityWebRequest.Result.Success)
                     {
@@ -179,9 +180,13 @@ namespace ByYourSight.Perception
                 }
                 else
                 {
-                    string surfaceDesc = SurfaceClassifier.Describe(hit, head);
-                    // On "Ini apa?", a horizontal surface at waist/desk height is a table/desk ("Meja"), not "Rintangan rendah"
-                    objName = surfaceDesc == SurfaceClassifier.LowObstacle ? "Meja" : surfaceDesc;
+                    // No camera detection: say so honestly instead of guessing "Meja"/"Dinding" from the Spatial Mesh,
+                    // so the tester (and developer) can tell whether the camera AI is connected and seeing anything.
+                    RealWorldObjectDetector det = FindObjectOfType<RealWorldObjectDetector>();
+                    if (det == null || !det.isServerConnected)
+                        objName = "Kamera AI tidak terhubung";
+                    else
+                        objName = "Kamera belum mengenali benda";
                 }
 
                 string detail = trackable != null ? trackable.detailedDescription : "";
@@ -670,7 +675,11 @@ namespace ByYourSight.Perception
                 string objRaw = obj.labelName.ToLowerInvariant();
                 string objIndo = RealWorldObjectDetector.ToIndonesianLabel(obj.labelName).ToLowerInvariant();
 
-                bool match = objRaw.Contains(qRaw) || qRaw.Contains(objRaw) ||
+                bool isCupGlassSynonym =
+                    ((qIndo == "gelas" || qIndo == "cangkir") && (objIndo == "gelas" || objIndo == "cangkir"));
+
+                bool match = isCupGlassSynonym ||
+                             objRaw.Contains(qRaw) || qRaw.Contains(objRaw) ||
                              objIndo.Contains(qIndo) || qIndo.Contains(objIndo);
 
                 if (match)
@@ -693,117 +702,70 @@ namespace ByYourSight.Perception
         /// </summary>
         private void MonitorApproachingPeople()
         {
-            if (Camera.main == null || PriorityAudioManager.Instance == null)
+            if (PriorityAudioManager.Instance == null)
                 return;
 
-            Transform head = Camera.main.transform;
-            TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
+            Camera activeCam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+            if (activeCam == null)
+                return;
 
-            MonitorNearbyPerson(head, allObjects);
+            Transform head = activeCam.transform;
+            TrackableObject[] allObjects = FindObjectsOfType<TrackableObject>();
+            float effectiveRadius = Mathf.Max(personDetectionRadius, 3.5f);
 
             foreach (var obj in allObjects)
             {
-                if (obj.category != SemanticObjectCategory.Person)
+                if (obj == null || obj.category != SemanticObjectCategory.Person)
                     continue;
 
-                // Sample every 0.5 s: camera-estimated distances jitter, so require two closer samples in a row (~0.3 m/s for 1 s)
                 float lastSample = _lastPersonSampleTime.TryGetValue(obj, out float ls) ? ls : -999f;
-                if (Time.time - lastSample < 0.5f)
+                if (Time.time - lastSample < 0.25f)
                     continue;
                 _lastPersonSampleTime[obj] = Time.time;
 
                 float currentDist = Vector3.Distance(head.position, obj.transform.position);
-                if (_previousPersonDistance.TryGetValue(obj, out float prevDist))
-                {
-                    int streak = (prevDist - currentDist) > 0.15f
-                        ? (_personApproachStreak.TryGetValue(obj, out int s) ? s : 0) + 1
-                        : 0;
-                    _personApproachStreak[obj] = streak;
+                if (currentDist < 0.45f)
+                    continue;
 
-                    if (currentDist <= personDetectionRadius && streak >= 2)
+                if (!_firstPersonSeenTime.TryGetValue(obj, out float firstSeen))
+                {
+                    firstSeen = Time.time;
+                    _firstPersonSeenTime[obj] = firstSeen;
+                }
+
+                if (_previousPersonDistance.TryGetValue(obj, out float peakDist))
+                {
+                    bool isCameraPerson = RealWorldObjectDetector.IsDetectionMarker(obj);
+                    bool approachedFromPeak = (peakDist - currentDist) >= 0.08f;
+                    bool enteredCloseZone = isCameraPerson && currentDist <= 3.2f && !_lastPersonAlertTime.ContainsKey(obj);
+
+                    if (currentDist <= effectiveRadius && (approachedFromPeak || enteredCloseZone))
                     {
                         float lastAlert = _lastPersonAlertTime.TryGetValue(obj, out float t) ? t : -999f;
                         if (Time.time - lastAlert >= personAlertCooldown && Time.time - _lastPersonSpeechTime >= personAlertCooldown)
                         {
                             _lastPersonAlertTime[obj] = Time.time;
+                            _previousPersonDistance[obj] = currentDist;
                             string dir = PriorityAudioManager.GetRelativeBodyDirection(head, obj.transform.position);
                             obj.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 2.5f);
 
-                            if (PriorityAudioManager.Instance.EnqueueSpeech(
-                                    $"Orang mendekat, {dir}",
-                                    AudioPriority.P2_SocialInfo,
-                                    obj.transform.position))
-                            {
-                                _lastPersonSpeechTime = Time.time;
-                            }
+                            PriorityAudioManager.Instance.EnqueueSpeech(
+                                $"Orang mendekat, {dir}",
+                                AudioPriority.P2_SocialInfo,
+                                obj.transform.position
+                            );
+                            continue;
                         }
                     }
+
+                    // Keep the peak distance since last alert so gradual walking speeds accumulate properly
+                    if (currentDist > peakDist)
+                        _previousPersonDistance[obj] = currentDist;
                 }
-
-                _previousPersonDistance[obj] = currentDist;
-            }
-        }
-
-        /// <summary>
-        /// KF08: Announces a person close in front of the user once, even when nobody is moving.
-        /// It stays quiet until nobody has been nearby for personNearbyResetSeconds.
-        /// </summary>
-        private void MonitorNearbyPerson(Transform head, TrackableObject[] allObjects)
-        {
-            if (Time.time < _nextNearbyPersonCheckTime)
-                return;
-            _nextNearbyPersonCheckTime = Time.time + 0.25f;
-
-            Vector3 flatForward = new Vector3(head.forward.x, 0f, head.forward.z);
-            TrackableObject nearest = null;
-            float nearestDist = personNearbyDistance;
-
-            foreach (TrackableObject obj in allObjects)
-            {
-                if (obj == null || obj.category != SemanticObjectCategory.Person)
-                    continue;
-
-                Vector3 toPerson = obj.transform.position - head.position;
-                toPerson.y = 0f;
-                float dist = toPerson.magnitude;
-                if (dist <= nearestDist && Vector3.Angle(flatForward, toPerson) <= personNearbyHalfAngle)
+                else
                 {
-                    nearestDist = dist;
-                    nearest = obj;
+                    _previousPersonDistance[obj] = currentDist;
                 }
-            }
-
-            if (nearest == null)
-            {
-                _nearbyPersonSince = -1f;
-                if (Time.time - _lastNearbyPersonTime > personNearbyResetSeconds)
-                    _nearbyPersonAnnounced = false;
-                return;
-            }
-
-            _lastNearbyPersonTime = Time.time;
-            if (_nearbyPersonSince < 0f)
-                _nearbyPersonSince = Time.time;
-
-            if (_nearbyPersonAnnounced || Time.time - _nearbyPersonSince < personNearbyConfirmSeconds)
-                return;
-
-            // "Orang mendekat" was just spoken: the user already knows about this person
-            if (Time.time - _lastPersonSpeechTime < personAlertCooldown)
-            {
-                _nearbyPersonAnnounced = true;
-                return;
-            }
-
-            string dir = PriorityAudioManager.GetRelativeBodyDirection(head, nearest.transform.position);
-            if (PriorityAudioManager.Instance.EnqueueSpeech(
-                    $"Orang, {dir}",
-                    AudioPriority.P2_SocialInfo,
-                    nearest.transform.position))
-            {
-                nearest.TriggerVisualHighlight(TrackableObject.HighContrastYellow, 2.5f);
-                _nearbyPersonAnnounced = true;
-                _lastPersonSpeechTime = Time.time;
             }
         }
     }

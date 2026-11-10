@@ -161,7 +161,7 @@ namespace ByYourSight.InputSystem
         // of 40+ items don't flood the recognizer with 300+ "cari ..." rules that hijack "ini apa".
         private static readonly string[] CoreSpeechObjectTerms = new string[]
         {
-            "pintu", "rak", "tempat sampah", "meja", "kursi", "tas", "handphone", "botol", "botol minum", "cangkir", "kunci", "buku", "laptop",
+            "pintu", "rak", "tempat sampah", "meja", "kursi", "tas", "handphone", "botol", "botol minum", "gelas", "cangkir", "kunci", "buku", "laptop",
             "door", "shelf", "trash bin", "desk", "chair", "bag", "phone", "water bottle", "coffee mug"
         };
 
