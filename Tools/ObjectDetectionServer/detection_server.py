@@ -176,11 +176,14 @@ def detect_frame(model, args, shared, frame, frame_time):
     h, w = frame.shape[:2]
     detections = []
     names = result.names
+    remaps = getattr(args, "remaps_dict", None) or {}
     for box in result.boxes:
         x1, y1, x2, y2 = box.xyxy[0].tolist()
         cls = int(box.cls[0])
+        raw_label = names[cls] if isinstance(names, (list, tuple)) else names.get(cls, str(cls))
+        final_label = remaps.get(str(raw_label).lower(), raw_label)
         detections.append({
-            "label": names[cls] if isinstance(names, (list, tuple)) else names.get(cls, str(cls)),
+            "label": final_label,
             "conf": round(float(box.conf[0]), 3),
             "cx": round(((x1 + x2) / 2) / w, 4),
             "cy": round(((y1 + y2) / 2) / h, 4),
@@ -297,6 +300,7 @@ def main():
         print("[model] YOLO-World classes:", ", ".join(WORLD_CLASSES))
 
     remaps = parse_remaps(args.remap)
+    args.remaps_dict = remaps
     if remaps:
         names_dict = getattr(getattr(model, "model", None), "names", None)
         if names_dict is None and hasattr(model, "names") and isinstance(model.names, dict):

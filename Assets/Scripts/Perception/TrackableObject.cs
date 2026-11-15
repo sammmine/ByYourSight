@@ -10,8 +10,8 @@ namespace ByYourSight.Perception
     }
 
     /// <summary>
-    /// Scene object marker (or 3D bounding box result from local YOLOv8 ONNX inference)
-    /// storing English metadata and supporting high-contrast visual highlights (T3 Design System).
+    /// Scene object marker and 3D bounding box tracking anchor
+    /// supporting high-contrast visual highlights (T3 Design System).
     /// </summary>
     public class TrackableObject : MonoBehaviour
     {
@@ -28,7 +28,6 @@ namespace ByYourSight.Perception
         private Renderer _renderer;
         private Color _originalColor;
         private float _highlightUntil = 0f;
-        private Color _activeHighlightColor;
         private LineRenderer _outlineBoxRenderer;
 
         // Semantic colors per T3 Design System (HoloLens Additive Display):
@@ -97,7 +96,6 @@ namespace ByYourSight.Perception
         public void TriggerVisualHighlight(Color semanticColor, float duration = 2.0f)
         {
             if (_renderer == null) return;
-            _activeHighlightColor = semanticColor;
             ApplyColor(semanticColor);
             if (_outlineBoxRenderer != null)
             {

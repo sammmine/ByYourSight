@@ -29,8 +29,11 @@ namespace ByYourSight.Perception
 
         private readonly Dictionary<TrackableObject, float> _lastPersonAlertTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _previousPersonDistance = new Dictionary<TrackableObject, float>();
-        private readonly Dictionary<TrackableObject, float> _firstPersonSeenTime = new Dictionary<TrackableObject, float>();
         private readonly Dictionary<TrackableObject, float> _lastPersonSampleTime = new Dictionary<TrackableObject, float>();
+
+        [Header("Persistence (KF02)")]
+        [Tooltip("If true, clears saved spatial anchors from disk on startup (useful for testing sessions).")]
+        public bool clearSavedAnchorsOnStart = false;
 
         [System.Serializable]
         private class SavedSpatialAnchorData
@@ -52,9 +55,14 @@ namespace ByYourSight.Perception
 
         private void Start()
         {
-            // Reset/hapus data objek tersimpan lama dari testing sebelumnya saat aplikasi dijalankan
-            ClearSavedAnchors();
-            LoadSavedAnchorsFromDisk();
+            if (clearSavedAnchorsOnStart)
+            {
+                ClearSavedAnchors();
+            }
+            else
+            {
+                LoadSavedAnchorsFromDisk();
+            }
         }
 
         private void Update()
@@ -863,12 +871,6 @@ namespace ByYourSight.Perception
                 float currentDist = Vector3.Distance(head.position, obj.transform.position);
                 if (currentDist < 0.45f)
                     continue;
-
-                if (!_firstPersonSeenTime.TryGetValue(obj, out float firstSeen))
-                {
-                    firstSeen = Time.time;
-                    _firstPersonSeenTime[obj] = firstSeen;
-                }
 
                 if (_previousPersonDistance.TryGetValue(obj, out float peakDist))
                 {

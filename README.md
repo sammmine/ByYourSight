@@ -59,7 +59,7 @@ flowchart TD
 
     subgraph AIServer["Laptop Object Detection Server (Python 3.11)"]
         PortalReader["Device Portal / Webcam Stream"]
-        YOLO["YOLO11s Detection Engine (yolo11s.pt)\n• Label Remapping: refrigerator -> shelf\n• Confidence Threshold: 0.25"]
+        YOLO["YOLO11s Detection Engine (yolo11s.pt)\n• Label Remapping: refrigerator -> shelf\n• Confidence Threshold: 0.15"]
         JSONEndpoint["HTTP Server (http://127.0.0.1:8765)\n• /preview.jpg (Live Web UI)\n• /detections (JSON)"]
     end
 
@@ -257,11 +257,18 @@ Pengguna dapat menandai benda atau perabot di dunia nyata dan menyimpannya secar
 * **`"Antar ke [tujuan]"`** (*"Navigate to [tujuan]"*) : Memandu rute jalan setapak demi setapak ke tujuan.
 
 ### C. Deteksi Rintangan Cerdas & Anti-Spam
-Modul [`ObstacleDetector.cs`](file:///Users/lanaginting/Documents/by-your-sight/ByYourSight/Assets/Scripts/Safety/ObstacleDetector.cs) dilengkapi mekanisme perlindungan anti-overstimulation:
+Modul [`ObstacleDetector.cs`](Assets/Scripts/Safety/ObstacleDetector.cs) dilengkapi mekanisme perlindungan anti-overstimulation:
 * **Threshold Jarak:** Peringatan pada jarak **1.1m**, Alarm Bahaya Kritis P0 pada jarak **0.45m**.
 * **Kecepatan Pendekatan:** Alarm hanya aktif jika pengguna bergerak maju (≥ `0.25 m/s` untuk peringatan umum, ≥ `0.15 m/s` untuk kritis). Berdiri diam atau menoleh di dekat meja tidak memicu alarm palsu.
 * **Filter Tangan/Orang Sendiri:** Kategori `Person` dikecualikan dari rintangan rute (orang dikelola terpisah di KF08) sehingga tangan pengguna yang terdeteksi kamera tidak memicu alarm rintangan.
 * **Cooldown Cerdas:** Cooldown rintangan sejenis selama 12 detik, rintangan posisi sama selama 20 detik, dan cooldown global minimum 4.0 detik.
+
+### D. Fitur "Ada apa saja?" (Ringkasan Objek Sekitar)
+Modul [`ObjectRecognizer.cs`](Assets/Scripts/Perception/ObjectRecognizer.cs) dan [`RealWorldObjectDetector.cs`](Assets/Scripts/Perception/RealWorldObjectDetector.cs) menyediakan ringkasan instan objek-objek di depan pengguna:
+* **Perintah Suara:** Ucapkan **`"Ada apa saja"`**, **`"Ada apa"`**, **`"Lihat sekitar"`**, atau *"What is around"*.
+* **Output Ringkas:** Mengumumkan hingga **3 objek terlihat sekaligus** beserta arah tubuh relatifnya (mis. *"Terlihat 3 benda: Laptop di depan, Gelas agak kanan, dan Kursi di kiri"*).
+* **Prioritas Cerdas:** Memprioritaskan objek kamera YOLO aktif, mengurutkan keragaman jenis objek (menghindari duplikasi label berulang), dan memprioritaskan objek spesifik di atas meja umum.
+* **Detail via Suara:** Ucapkan **`"Detail"`** setelah pengumuman untuk mendengar jarak meter setiap objek dan rincian keyakinan deteksi.
 
 ---
 
@@ -330,11 +337,3 @@ Assets/Scripts/
 | **Logat suara TTS di Windows terdengar seperti aksen Inggris** | Paket suara *Text-to-speech* Bahasa Indonesia (*Microsoft Andika*) belum diinstal di Windows. | Buka **Windows Settings > Time & Language > Language & Region > Add a language > Bahasa Indonesia** dan centang *Text-to-speech*. |
 | **Objek rak terbaca kulkas (*refrigerator*)** | Dataset standar COCO tidak memiliki kelas `shelf`. | Fitur auto-remapping sudah terpasang di `detection_server.py` (`refrigerator -> shelf`) dan diterjemahkan menjadi **`Rak`** di Unity. |
 | **Preview webcam terasa lambat (FPS rendah)** | Penggunaan model berat atau inferensi CPU. | Model default sudah menggunakan `yolo11s.pt`. Jika laptop memiliki kartu grafis NVIDIA, tambahkan opsi `--device 0`. |
-
-py -0p
-py -3.11 -m venv .venv-py311
-.\.venv-py311\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -c "import sys, torch, cv2, numpy; print(sys.version); print('torch', torch.__version__, 'opencv', cv2.__version__, 'numpy', numpy.__version__)"
-python detection_server.py --source 0

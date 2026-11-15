@@ -67,6 +67,7 @@ namespace ByYourSight.Perception
             public string detailedDescription;
         }
 
+#pragma warning disable 0649
         [Serializable]
         private class DetectionDto
         {
@@ -86,6 +87,7 @@ namespace ByYourSight.Perception
             public int height;
             public DetectionDto[] detections;
         }
+#pragma warning restore 0649
 
         private class TrackedDetection
         {
@@ -246,7 +248,6 @@ namespace ByYourSight.Perception
         private float _latestNonEmptyWallTime = -100f;
         private float _lastNonEmptyBatchTime = -100f;
         private bool _warnedOffline = false;
-        private float _lastFrameStamp = -100f;
         private Material _markerMaterial;
 
         private Transform GetCameraTransform()
@@ -545,7 +546,6 @@ namespace ByYourSight.Perception
 
             float effectiveAge = Mathf.Clamp(resp.age, 0f, 2.0f);
             float frameStamp = requestTime - effectiveAge;
-            _lastFrameStamp = frameStamp;
 
             // Head pose at the moment the camera frame was captured
             float captureTime = frameStamp - streamLatencySeconds;
@@ -707,12 +707,7 @@ namespace ByYourSight.Perception
                    string.Equals(label, "desk", StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>
-        /// Returns the most central non-person object actively detected on the camera stream (http://127.0.0.1:8765)
-        /// within the last maxAgeSeconds. Prioritizes specific objects (kursi, buku, gelas, cangkir, botol, laptop, TV)
-        /// over generic tables (meja), and picks the object closest to the center of the camera frame (cx=0.5, cy=0.5).
-        /// </summary>
-        public TrackableObject GetMostCentralActiveDetection(float maxAgeSeconds = 20.0f)
+        private void PrepareActiveResponse(float maxAgeSeconds)
         {
             DetectionResponse activeResp = (_latestResponse != null && _latestResponse.detections != null && _latestResponse.detections.Length > 0)
                 ? _latestResponse
@@ -723,6 +718,16 @@ namespace ByYourSight.Perception
             {
                 ProcessDetections(activeResp, activeWallTime, forceProcess: true);
             }
+        }
+
+        /// <summary>
+        /// Returns the most central non-person object actively detected on the camera stream (http://127.0.0.1:8765)
+        /// within the last maxAgeSeconds. Prioritizes specific objects (kursi, buku, gelas, cangkir, botol, laptop, TV)
+        /// over generic tables (meja), and picks the object closest to the center of the camera frame (cx=0.5, cy=0.5).
+        /// </summary>
+        public TrackableObject GetMostCentralActiveDetection(float maxAgeSeconds = 20.0f)
+        {
+            PrepareActiveResponse(maxAgeSeconds);
 
             TrackableObject best = null;
             float bestScore = float.MaxValue;
@@ -770,15 +775,7 @@ namespace ByYourSight.Perception
             distanceMeters = 0f;
             detailedDescription = "";
 
-            DetectionResponse activeResp = (_latestResponse != null && _latestResponse.detections != null && _latestResponse.detections.Length > 0)
-                ? _latestResponse
-                : _latestNonEmptyResponse;
-            float activeWallTime = (activeResp == _latestResponse) ? _latestResponseWallTime : _latestNonEmptyWallTime;
-
-            if (activeResp != null && (Time.realtimeSinceStartup - activeWallTime) <= maxAgeSeconds)
-            {
-                ProcessDetections(activeResp, activeWallTime, forceProcess: true);
-            }
+            PrepareActiveResponse(maxAgeSeconds);
 
             float now = Time.time;
             Transform cam = head != null ? head : GetCameraTransform();
@@ -840,6 +837,38 @@ namespace ByYourSight.Perception
             return true;
         }
 
+        private VisibleObjectItem CreateVisibleObjectItem(
+            TrackedDetection t,
+            Vector3 headPos,
+            Quaternion headRot,
+            Transform cam,
+            float tanH,
+            float tanV,
+            string indo)
+        {
+            Vector3 localDir = new Vector3((t.lastCx - 0.5f) * 2f * tanH, -(t.lastCy - 0.5f) * 2f * tanV, 1f).normalized;
+            Vector3 worldDir = headRot * localDir;
+
+            float dist = Mathf.Clamp(
+                t.lastEstimatedDistance > 0.1f ? t.lastEstimatedDistance : Vector3.Distance(headPos, t.marker.transform.position),
+                0.5f,
+                maxDetectionDistance
+            );
+            Vector3 targetPoint = headPos + worldDir * dist;
+            t.marker.transform.position = targetPoint;
+            string dir = PriorityAudioManager.GetRelativeBodyDirection(cam, targetPoint);
+
+            return new VisibleObjectItem
+            {
+                marker = t.marker,
+                label = indo,
+                position = targetPoint,
+                distance = dist,
+                direction = dir,
+                detailedDescription = t.marker.detailedDescription
+            };
+        }
+
         /// <summary>
         /// Resolves up to maxCount visible objects for "Ada apa saja?" ("What is around?").
         /// Prioritizes current camera frame objects, distinct object types over duplicate labels,
@@ -854,15 +883,7 @@ namespace ByYourSight.Perception
         {
             results = new List<VisibleObjectItem>();
 
-            DetectionResponse activeResp = (_latestResponse != null && _latestResponse.detections != null && _latestResponse.detections.Length > 0)
-                ? _latestResponse
-                : _latestNonEmptyResponse;
-            float activeWallTime = (activeResp == _latestResponse) ? _latestResponseWallTime : _latestNonEmptyWallTime;
-
-            if (activeResp != null && (Time.realtimeSinceStartup - activeWallTime) <= maxAgeSeconds)
-            {
-                ProcessDetections(activeResp, activeWallTime, forceProcess: true);
-            }
+            PrepareActiveResponse(maxAgeSeconds);
 
             float now = Time.time;
             Transform cam = head != null ? head : GetCameraTransform();
@@ -919,27 +940,7 @@ namespace ByYourSight.Perception
                 if (seenLabels.Contains(indo))
                     continue;
 
-                Vector3 localDir = new Vector3((t.lastCx - 0.5f) * 2f * tanH, -(t.lastCy - 0.5f) * 2f * tanV, 1f).normalized;
-                Vector3 worldDir = headRot * localDir;
-
-                float dist = Mathf.Clamp(
-                    t.lastEstimatedDistance > 0.1f ? t.lastEstimatedDistance : Vector3.Distance(headPos, t.marker.transform.position),
-                    0.5f,
-                    maxDetectionDistance
-                );
-                Vector3 targetPoint = headPos + worldDir * dist;
-                t.marker.transform.position = targetPoint;
-                string dir = PriorityAudioManager.GetRelativeBodyDirection(cam, targetPoint);
-
-                results.Add(new VisibleObjectItem
-                {
-                    marker = t.marker,
-                    label = indo,
-                    position = targetPoint,
-                    distance = dist,
-                    direction = dir,
-                    detailedDescription = t.marker.detailedDescription
-                });
+                results.Add(CreateVisibleObjectItem(t, headPos, headRot, cam, tanH, tanV, indo));
                 seenLabels.Add(indo);
             }
 
@@ -964,27 +965,7 @@ namespace ByYourSight.Perception
                         continue;
 
                     string indo = ToIndonesianLabel(t.label);
-                    Vector3 localDir = new Vector3((t.lastCx - 0.5f) * 2f * tanH, -(t.lastCy - 0.5f) * 2f * tanV, 1f).normalized;
-                    Vector3 worldDir = headRot * localDir;
-
-                    float dist = Mathf.Clamp(
-                        t.lastEstimatedDistance > 0.1f ? t.lastEstimatedDistance : Vector3.Distance(headPos, t.marker.transform.position),
-                        0.5f,
-                        maxDetectionDistance
-                    );
-                    Vector3 targetPoint = headPos + worldDir * dist;
-                    t.marker.transform.position = targetPoint;
-                    string dir = PriorityAudioManager.GetRelativeBodyDirection(cam, targetPoint);
-
-                    results.Add(new VisibleObjectItem
-                    {
-                        marker = t.marker,
-                        label = indo,
-                        position = targetPoint,
-                        distance = dist,
-                        direction = dir,
-                        detailedDescription = t.marker.detailedDescription
-                    });
+                    results.Add(CreateVisibleObjectItem(t, headPos, headRot, cam, tanH, tanV, indo));
                 }
             }
 

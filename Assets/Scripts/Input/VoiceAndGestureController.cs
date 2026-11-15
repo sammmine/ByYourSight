@@ -13,9 +13,8 @@ namespace ByYourSight.InputSystem
 {
     /// <summary>
     /// Manages:
-    /// - KF04: Native HoloLens 2 Offline English Voice Command Vocabulary via Windows KeywordRecognizer
-    ///         ("What is this?", "Save object", "Find [item]", "Navigate to [destination]",
-    ///          "Mute"/"Resume", "Repeat", "Details", "Help", "Cancel").
+    /// - KF04: Native HoloLens 2 Offline Voice Command Vocabulary via Windows KeywordRecognizer
+    ///         (Bilingual Bahasa Indonesia with phonetic matching + English fallback).
     /// - KF06: Adaptive volume based on ambient noise + Quick one-handed Mute gesture.
     /// - Editor Simulation (WASD + Mouse Look + Voice Command HUD) for testing on macOS/PC.
     /// </summary>
@@ -32,7 +31,7 @@ namespace ByYourSight.InputSystem
         public float simulatedAmbientNoiseLevel = 0.2f;
 
         [Header("HoloLens 2 Real-World Mode vs Editor Simulation")]
-        [Tooltip("If true, hides the dummy floor & simulated obstacles so HoloLens scans the real physical room via Spatial Mesh.")]
+        [Tooltip("If true, hides the simulated floor & obstacles so HoloLens scans the real physical room via Spatial Mesh.")]
         public bool isRealHoloLensRoomMode = false;
         public bool enableEditorWalkSimulation = true;
         public float walkSpeed = 2.2f;
@@ -166,16 +165,7 @@ namespace ByYourSight.InputSystem
         private KeywordRecognizer _keywordRecognizer;
 #endif
 
-        [Header("Real-Room Tagging (Simpan -> Cari / Antar ke)")]
-        [Tooltip("Labels the user can tag in the real room (supports both Indonesian and English).")]
-        public List<string> realWorldTagLabels = new List<string>
-        {
-            "pintu", "rak", "tempat sampah", "meja", "kursi", "tas", "handphone", "botol", "cangkir", "kunci", "buku", "laptop",
-            "door", "shelf", "trash bin", "desk", "chair", "bag", "phone", "water bottle", "coffee mug"
-        };
-
-        // Always use the focused core list when building the KeywordRecognizer grammar so serialized scene lists
-        // of 40+ items don't flood the recognizer with 300+ "cari ..." rules that hijack "ini apa".
+        // Focused core object vocabulary for KeywordRecognizer grammar rules
         private static readonly string[] CoreSpeechObjectTerms = new string[]
         {
             "pintu", "rak", "tempat sampah", "meja", "kursi", "tas", "handphone", "botol", "botol minum", "gelas", "cangkir", "kunci", "buku", "laptop",
