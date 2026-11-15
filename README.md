@@ -65,9 +65,9 @@ flowchart TD
 
     subgraph UnityCore["Unity Core Subsystems (ByYourSight)"]
         OD["ObstacleDetector.cs (KF07)\n• Anti-Overstimulation & Anti-Spam Cooldown\n• Abaikan Person/Tangan Sendiri"]
-        OR["ObjectRecognizer.cs (KF01, KF02, KF08)\n• Gaze Target Selection (Cone Fallback)\n• Persistent Storage: saved_spatial_anchors.json"]
+        OR["ObjectRecognizer.cs (KF01, KF02, KF08)\n• Gaze Target Selection (Cone Fallback)\n• Ringkasan Sekitar 'Ada apa saja'\n• Persistent Storage: saved_spatial_anchors.json"]
         SBN["SpatialBeaconAndNavigator.cs (KF03, KF05)\n• Spatial Audio Beacon (15° cone)\n• Waypoint Graph Routing"]
-        VGC["VoiceAndGestureController.cs (KF04, KF06)\n• English Offline KeywordRecognizer\n• Adaptive Noise Volume Monitor"]
+        VGC["VoiceAndGestureController.cs (KF04, KF06)\n• Bilingual KeywordRecognizer (ID/EN)\n• Adaptive Noise Volume Monitor"]
         RWOD["RealWorldObjectDetector.cs\n• Polling JSON dari AI Server\n• Estimasi Jarak Benda Genggam"]
         PAM["PriorityAudioManager.cs\n• Central Priority Queue (P0-P3)\n• Procedural Earcon Synthesizer\n• UWP / Windows / macOS Native TTS"]
     end
@@ -292,7 +292,7 @@ Karena mesin *offline* `KeywordRecognizer` pada HoloLens 2 menggunakan model aku
 | **"Detail"** / *"Details"* | `8` | Kontrol Audio | Menyebutkan deskripsi lengkap objek |
 | **"Batal"** / **"Berhenti"** / *"Stop"* | `9` | Kontrol Navigasi | *"Panduan dibatalkan"* |
 | **"Diam"** / **"Lanjut"** / *"Mute"* | `M` | KF06: Kontrol Mute Cepat | *"Audio dibisukan"* (P0 tetap aktif) / *"Audio aktif"* |
-| **"Bantuan"** / **"Tolong"** / *"Help"* | — | Panduan Pengguna | *"Katakan: Ini apa, Cari objek, Antar ke pintu, atau Diam"* |
+| **"Bantuan"** / **"Tolong"** / *"Help"* | — | Panduan Pengguna | *"Ucapkan: Ini apa, Ada apa saja, Simpan objek, Cari benda, Antar ke pintu, atau Diam"* |
 
 > **Tips Aksentuasi Suara Bahasa Indonesia:**
 > - **Di macOS:** Sistem otomatis menggunakan suara native Bahasa Indonesia **`Damayanti`**.
@@ -313,8 +313,8 @@ Assets/Scripts/
 ├── Navigation/
 │   └── SpatialBeaconAndNavigator.cs  # Audio Beacon 15° (KF03) & Rute Waypoint (KF05)
 ├── Perception/
-│   ├── ObjectRecognizer.cs          # Gaze identification (KF01), persistent saving (KF02), social info (KF08)
-│   ├── RealWorldObjectDetector.cs   # Client penerima deteksi YOLO & kamus terjemahan Bahasa Indonesia
+│   ├── ObjectRecognizer.cs          # Gaze id (KF01), ringkasan sekitar 'Ada apa saja', simpan objek (KF02), social info (KF08)
+│   ├── RealWorldObjectDetector.cs   # Polling deteksi YOLO, kamus Bahasa Indonesia, filter keragaman objek
 │   ├── TrackableObject.cs           # Metadata objek & visual bounding box kontras tinggi
 │   └── SurfaceClassifier.cs         # Klasifikasi permukaan Spatial Mesh (Lantai, Dinding, Rintangan)
 ├── Safety/
