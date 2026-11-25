@@ -68,14 +68,42 @@ namespace ByYourSight.Audio
         public string lastDetailedText = "";
         public AudioPriority currentPriority = AudioPriority.P3_ObjectIdentity;
 
+        [Header("Output Clarity (gain, compression, peripherals)")]
+        [Tooltip("Apply high-pass + presence boost + dynamic compression + normalization to every TTS clip.")]
+        public bool enableTtsCompression = true;
+        public TtsAudioProcessor.Settings ttsProcessing = new TtsAudioProcessor.Settings();
+
+        [Tooltip("Silence between two consecutive utterances so instructions never run into each other.")]
+        [Range(0f, 1f)] public float interUtteranceGapSeconds = 0.25f;
+
+        [Tooltip("Queued P2/P3 messages older than this are dropped instead of being read out late.")]
+        [Range(2f, 30f)] public float maxQueuedAgeSeconds = 7f;
+
+        [Tooltip("Maximum time to wait for online/offline TTS synthesis before moving on.")]
+        [Range(1f, 8f)] public float maxPrepareSeconds = 5f;
+
+        [Tooltip("Spoken voice is placed this far from the head, in the object's direction, so far objects don't sound quieter.")]
+        [Range(0.5f, 3f)] public float voiceAnchorDistance = 1.0f;
+
+        private enum VoiceState { Idle, Preparing, Playing, ExternalProcess }
+
         private readonly List<SpeechRequest> _queue = new List<SpeechRequest>();
         private readonly Dictionary<string, AudioClip> _ttsClipCache = new Dictionary<string, AudioClip>(StringComparer.OrdinalIgnoreCase);
         private AudioSource _earconSource;
-        private AudioSource _spatialVoiceSource;
+        private AudioSource _spatialVoiceSource; // speech only (one utterance at a time)
+        private AudioSource _cueSource;          // spatial pings / spatial earcons at the real object position
+        private VoiceOutputLimiter _voiceLimiter;
+        private VoiceOutputLimiter _cueLimiter;
+        private VoiceOutputLimiter _earconLimiter;
+        private AudioOutputRouter _router;
         private Coroutine _activeSpeechCoroutine;
         private float _speechBusyUntil = 0f;
         private float _lastDangerAlertTime = -10f;
         private bool _lastDangerHadEarcon = false;
+        private VoiceState _voiceState = VoiceState.Idle;
+        private float _prepareDeadline = 0f;
+        private int _speechToken = 0;
+        private Vector3? _currentVoiceTarget;
 
 #if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
         private Process _macSayProcess;
@@ -95,13 +123,43 @@ namespace ByYourSight.Audio
 
             _earconSource = gameObject.AddComponent<AudioSource>();
             _earconSource.spatialBlend = 0f; // 2D system earcon
+            _earconSource.playOnAwake = false;
+            _earconLimiter = gameObject.AddComponent<VoiceOutputLimiter>();
 
+            // Speech emitter: kept ~1 m from the head in the object's direction, so it carries
+            // direction without distance attenuation (far objects used to sound too quiet).
             GameObject spatialObj = new GameObject("SpatialVoiceEmitter");
             spatialObj.transform.SetParent(transform);
             _spatialVoiceSource = spatialObj.AddComponent<AudioSource>();
-            _spatialVoiceSource.spatialBlend = 1.0f; // 3D Spatial Audio
-            _spatialVoiceSource.minDistance = 0.5f;
-            _spatialVoiceSource.maxDistance = 12f;
+            _spatialVoiceSource.playOnAwake = false;
+            _spatialVoiceSource.spatialBlend = 0.5f;
+            _spatialVoiceSource.rolloffMode = AudioRolloffMode.Linear;
+            _spatialVoiceSource.minDistance = 5f;  // full volume within 5 m (voice sits at ~1 m)
+            _spatialVoiceSource.maxDistance = 50f;
+            _spatialVoiceSource.dopplerLevel = 0f;
+            _spatialVoiceSource.priority = 0;      // never virtualized
+            _voiceLimiter = spatialObj.AddComponent<VoiceOutputLimiter>();
+
+            // Cue emitter: pings/beacons at the real object position. Custom rolloff keeps the
+            // "closer = louder" cue but never drops below ~45% so far targets stay audible.
+            GameObject cueObj = new GameObject("SpatialCueEmitter");
+            cueObj.transform.SetParent(transform);
+            _cueSource = cueObj.AddComponent<AudioSource>();
+            _cueSource.playOnAwake = false;
+            _cueSource.spatialBlend = 1.0f;
+            _cueSource.rolloffMode = AudioRolloffMode.Custom;
+            _cueSource.maxDistance = 15f;
+            _cueSource.SetCustomCurve(AudioSourceCurveType.CustomRolloff,
+                new AnimationCurve(new Keyframe(0f, 1f), new Keyframe(0.1f, 0.95f), new Keyframe(1f, 0.45f)));
+            _cueSource.dopplerLevel = 0f;
+            _cueSource.priority = 16;
+            _cueLimiter = cueObj.AddComponent<VoiceOutputLimiter>();
+
+            _router = GetComponent<AudioOutputRouter>();
+            if (_router == null)
+                _router = gameObject.AddComponent<AudioOutputRouter>();
+            _router.DeviceReset += OnAudioDeviceReset;
+            ApplyOutputProfile();
 
 #if WINDOWS_UWP
             _uwpSynthesizer = new SpeechSynthesizer();
@@ -111,11 +169,23 @@ namespace ByYourSight.Audio
 
         private void Update()
         {
+            ApplyOutputProfile();
+            UpdateVoiceAnchor();
+
+            if (IsVoiceBusy())
+                return;
+
             if (Time.time < _speechBusyUntil)
                 return;
 
             currentSpokenText = "";
 
+            if (_queue.Count == 0)
+                return;
+
+            // Drop stale P2/P3 info rather than reading it out late on top of newer events.
+            float now = Time.time;
+            _queue.RemoveAll(q => q.Priority >= AudioPriority.P2_SocialInfo && now - q.Timestamp > maxQueuedAgeSeconds);
             if (_queue.Count == 0)
                 return;
 
@@ -134,6 +204,120 @@ namespace ByYourSight.Audio
                 return;
 
             ExecuteSpeech(next);
+        }
+
+        /// <summary>
+        /// True while an utterance is being synthesized or is audibly playing. Speech start is
+        /// gated on the real playback state (not a word-count estimate), so a new instruction can
+        /// never start on top of one that is still playing.
+        /// </summary>
+        private bool IsVoiceBusy()
+        {
+            switch (_voiceState)
+            {
+                case VoiceState.Preparing:
+                    if (Time.time < _prepareDeadline)
+                        return true;
+                    UnityEngine.Debug.LogWarning("[Audio] TTS synthesis timed out; moving to next message.");
+                    FinishUtterance();
+                    return false;
+
+                case VoiceState.Playing:
+                    if (_spatialVoiceSource != null && _spatialVoiceSource.isPlaying)
+                        return true;
+                    FinishUtterance();
+                    return false;
+
+#if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
+                case VoiceState.ExternalProcess:
+                    bool running = false;
+                    try { running = _macSayProcess != null && !_macSayProcess.HasExited; } catch { }
+                    if (running && Time.time < _prepareDeadline + 15f)
+                        return true;
+                    FinishUtterance();
+                    return false;
+#endif
+                default:
+                    return false;
+            }
+        }
+
+        private void FinishUtterance()
+        {
+            _voiceState = VoiceState.Idle;
+            _currentVoiceTarget = null;
+            _speechBusyUntil = Time.time + interUtteranceGapSeconds;
+        }
+
+        private void ApplyOutputProfile()
+        {
+            if (_router == null)
+                return;
+
+            AudioOutputRouter.ProfileSettings p = _router.ActiveSettings;
+            // adaptiveVolumeMultiplier (ambient noise, KF06) is applied as extra dB gain so it can
+            // go above 1.0 without hard clipping (the limiter catches the peaks).
+            float noiseDb = 20f * Mathf.Log10(Mathf.Max(0.05f, adaptiveVolumeMultiplier));
+
+            if (_voiceLimiter != null) _voiceLimiter.gainDb = Mathf.Clamp(p.voiceGainDb + noiseDb, -12f, 18f);
+            // Earcon clips already bake adaptiveVolumeMultiplier into their amplitude.
+            if (_cueLimiter != null) _cueLimiter.gainDb = Mathf.Clamp(p.earconGainDb, -12f, 18f);
+            if (_earconLimiter != null) _earconLimiter.gainDb = Mathf.Clamp(p.earconGainDb, -12f, 18f);
+            if (_spatialVoiceSource != null) _spatialVoiceSource.spatialBlend = p.voiceSpatialBlend;
+        }
+
+        /// <summary>Keeps the voice emitter ~1 m from the head, pointing towards the current target.</summary>
+        private void UpdateVoiceAnchor()
+        {
+            if (_spatialVoiceSource == null)
+                return;
+
+            Camera cam = Camera.main;
+            if (cam == null)
+                return;
+
+            Transform head = cam.transform;
+            Vector3 dir = head.forward;
+            if (_currentVoiceTarget.HasValue)
+            {
+                Vector3 toTarget = _currentVoiceTarget.Value - head.position;
+                if (toTarget.sqrMagnitude > 0.0001f)
+                    dir = toTarget.normalized;
+            }
+            _spatialVoiceSource.transform.position = head.position + dir * voiceAnchorDistance;
+        }
+
+        private void OnAudioDeviceReset()
+        {
+            // AudioSettings.Reset stops all playback and may invalidate procedural clips.
+            _ttsClipCache.Clear();
+            if (_voiceLimiter != null) _voiceLimiter.ResetAfterDeviceChange();
+            if (_cueLimiter != null) _cueLimiter.ResetAfterDeviceChange();
+            if (_earconLimiter != null) _earconLimiter.ResetAfterDeviceChange();
+            StopCurrentSpeech();
+        }
+
+        /// <summary>
+        /// Plays a finished TTS clip as the single active utterance (replaces, never overlaps).
+        /// Ignored if a newer utterance started or speech was stopped meanwhile.
+        /// </summary>
+        private void PlayVoiceClip(AudioClip clip, int token)
+        {
+            if (clip == null || _spatialVoiceSource == null || token != _speechToken)
+                return;
+
+            _spatialVoiceSource.Stop();
+            _spatialVoiceSource.clip = clip;
+            _spatialVoiceSource.volume = 1f;
+            _spatialVoiceSource.Play();
+            _voiceState = VoiceState.Playing;
+        }
+
+        private AudioClip PrepareClip(AudioClip raw)
+        {
+            if (!enableTtsCompression || raw == null)
+                return raw;
+            return TtsAudioProcessor.ProcessClip(raw, ttsProcessing);
         }
 
         /// <summary>
@@ -185,8 +369,10 @@ namespace ByYourSight.Audio
                 _queue.RemoveAll(q => q.Priority == AudioPriority.P1_Navigation);
             }
 
-            // Avoid duplicate identical messages in the queue
+            // Avoid duplicate identical messages in the queue or the one being spoken right now
             if (_queue.Exists(q => q.Text == shortText))
+                return false;
+            if (_voiceState != VoiceState.Idle && currentSpokenText == shortText)
                 return false;
 
             _queue.Add(new SpeechRequest
@@ -207,18 +393,25 @@ namespace ByYourSight.Audio
             lastSpokenText = req.Text;
             lastDetailedText = string.IsNullOrEmpty(req.DetailedText) ? req.Text : req.DetailedText;
 
-            if (req.WorldPosition.HasValue)
+            // Cut whatever is still playing so two utterances never overlap.
+            if (_spatialVoiceSource != null)
+                _spatialVoiceSource.Stop();
+
+            _currentVoiceTarget = req.WorldPosition;
+            UpdateVoiceAnchor();
+
+            if (req.WorldPosition.HasValue && _cueSource != null)
             {
-                _spatialVoiceSource.transform.position = req.WorldPosition.Value;
-                // Play a soft spatial ping from the object's 3D position
-                AudioClip ping = GenerateToneClip(660f, 660f, 0.08f, 0.25f * adaptiveVolumeMultiplier);
-                _spatialVoiceSource.PlayOneShot(ping);
+                _cueSource.transform.position = req.WorldPosition.Value;
+                // Soft spatial ping from the object's real 3D position (gain handled by limiter)
+                AudioClip ping = GenerateToneClip(660f, 660f, 0.08f, Mathf.Clamp01(0.35f * adaptiveVolumeMultiplier));
+                _cueSource.PlayOneShot(ping);
             }
 
-            // Estimate speech duration (~0.38s per word, minimum 1.4s)
-            int wordCount = req.Text.Split(' ').Length;
-            float duration = Mathf.Max(1.4f, wordCount * 0.38f);
-            _speechBusyUntil = Time.time + duration;
+            _speechToken++;
+            _voiceState = VoiceState.Preparing;
+            _prepareDeadline = Time.time + maxPrepareSeconds;
+            _speechBusyUntil = 0f;
 
             UnityEngine.Debug.Log($"[Audio {req.Priority}] \"{req.Text}\"");
 
@@ -226,7 +419,7 @@ namespace ByYourSight.Audio
             {
                 StopCoroutine(_activeSpeechCoroutine);
             }
-            _activeSpeechCoroutine = StartCoroutine(SpeakIndonesianCoroutine(req.Text));
+            _activeSpeechCoroutine = StartCoroutine(SpeakIndonesianCoroutine(req.Text, _speechToken));
         }
 
         /// <summary>
@@ -271,6 +464,9 @@ namespace ByYourSight.Audio
         {
             _speechBusyUntil = 0f;
             currentSpokenText = "";
+            _speechToken++; // invalidates any in-flight TTS download/synthesis
+            _voiceState = VoiceState.Idle;
+            _currentVoiceTarget = null;
             if (_activeSpeechCoroutine != null)
             {
                 StopCoroutine(_activeSpeechCoroutine);
@@ -327,8 +523,8 @@ namespace ByYourSight.Audio
 
             if (spatialPos.HasValue)
             {
-                _spatialVoiceSource.transform.position = spatialPos.Value;
-                _spatialVoiceSource.PlayOneShot(clip);
+                _cueSource.transform.position = spatialPos.Value;
+                _cueSource.PlayOneShot(clip);
             }
             else
             {
@@ -380,21 +576,20 @@ namespace ByYourSight.Audio
         /// requiring Windows Language Pack installation, and caches AudioClips in memory for 0ms replay).
         /// Falls back to offline OS TTS if no internet connection is available.
         /// </summary>
-        private IEnumerator SpeakIndonesianCoroutine(string text)
+        private IEnumerator SpeakIndonesianCoroutine(string text, int token)
         {
             if (string.IsNullOrWhiteSpace(text))
+            {
+                if (token == _speechToken) FinishUtterance();
                 yield break;
+            }
 
             string key = text.Trim();
 
             // 1. Instant replay from in-memory cache if this phrase was spoken before
             if (_ttsClipCache.TryGetValue(key, out AudioClip cachedClip) && cachedClip != null)
             {
-                if (_spatialVoiceSource != null)
-                {
-                    _speechBusyUntil = Mathf.Max(_speechBusyUntil, Time.time + cachedClip.length + 0.15f);
-                    _spatialVoiceSource.PlayOneShot(cachedClip, adaptiveVolumeMultiplier);
-                }
+                PlayVoiceClip(cachedClip, token);
                 yield break;
             }
 
@@ -406,6 +601,12 @@ namespace ByYourSight.Audio
             {
                 www.SetRequestHeader("User-Agent", "Mozilla/5.0");
                 www.timeout = 3;
+                if (www.downloadHandler is DownloadHandlerAudioClip dh)
+                {
+                    // Fully decoded PCM is required so the compressor can read the samples.
+                    dh.streamAudio = false;
+                    dh.compressed = false;
+                }
                 yield return www.SendWebRequest();
 
                 if (www.result == UnityWebRequest.Result.Success)
@@ -414,24 +615,26 @@ namespace ByYourSight.Audio
                     if (clip != null && clip.length > 0.05f)
                     {
                         clip.name = "TTS_ID_" + key;
+                        clip = PrepareClip(clip);
                         _ttsClipCache[key] = clip;
-                        if (_spatialVoiceSource != null)
-                        {
-                            _speechBusyUntil = Mathf.Max(_speechBusyUntil, Time.time + clip.length + 0.15f);
-                            _spatialVoiceSource.PlayOneShot(clip, adaptiveVolumeMultiplier);
-                        }
+                        PlayVoiceClip(clip, token);
                         yield break;
                     }
                 }
             }
 
+            if (token != _speechToken)
+                yield break; // a newer utterance or a stop superseded this one
+
             // 3. Offline fallback if internet is unreachable
 #if WINDOWS_UWP
-            SpeakWithHoloLensNativeUWP(key);
+            SpeakWithHoloLensNativeUWP(key, token);
 #elif UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
-            SpeakWithWindowsOfflineFallback(key);
+            SpeakWithWindowsOfflineFallback(key, token);
 #elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
             SpeakWithMacOSDamayanti(key);
+#else
+            FinishUtterance();
 #endif
         }
 
@@ -462,7 +665,7 @@ namespace ByYourSight.Audio
         /// <summary>
         /// Offline fallback on Windows Holographic OS (HoloLens 2) using SpeechSynthesizer.
         /// </summary>
-        private async void SpeakWithHoloLensNativeUWP(string text)
+        private async void SpeakWithHoloLensNativeUWP(string text, int token)
         {
             try
             {
@@ -482,9 +685,11 @@ namespace ByYourSight.Audio
 
                 // Convert 16-bit PCM WAV stream from Windows SpeechSynthesizer into Unity AudioClip
                 AudioClip ttsClip = ConvertWavBytesToAudioClip(bytes);
-                if (ttsClip != null && _spatialVoiceSource != null)
+                if (ttsClip != null)
                 {
-                    _spatialVoiceSource.PlayOneShot(ttsClip, adaptiveVolumeMultiplier);
+                    ttsClip = PrepareClip(ttsClip);
+                    _ttsClipCache[text] = ttsClip;
+                    PlayVoiceClip(ttsClip, token);
                 }
             }
             catch (Exception e)
@@ -542,7 +747,7 @@ namespace ByYourSight.Audio
         /// Offline fallback on Windows when no internet connection is available.
         /// Selects Indonesian voice if installed, otherwise forces Female voice instead of male David.
         /// </summary>
-        private void SpeakWithWindowsOfflineFallback(string text)
+        private void SpeakWithWindowsOfflineFallback(string text, int token)
         {
             try
             {
@@ -581,9 +786,11 @@ namespace ByYourSight.Audio
                 {
                     byte[] wavBytes = File.ReadAllBytes(tempWav);
                     AudioClip ttsClip = ConvertWavBytesToAudioClip(wavBytes);
-                    if (ttsClip != null && _spatialVoiceSource != null)
+                    if (ttsClip != null)
                     {
-                        _spatialVoiceSource.PlayOneShot(ttsClip, adaptiveVolumeMultiplier);
+                        ttsClip = PrepareClip(ttsClip);
+                        _ttsClipCache[text] = ttsClip;
+                        PlayVoiceClip(ttsClip, token);
                     }
                 }
             }
@@ -613,6 +820,7 @@ namespace ByYourSight.Audio
                     CreateNoWindow = true
                 };
                 _macSayProcess = Process.Start(psi);
+                _voiceState = VoiceState.ExternalProcess;
             }
             catch (Exception e)
             {
