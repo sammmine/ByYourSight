@@ -274,11 +274,11 @@ def main():
     ap.add_argument("--source", help="Use another video source instead, e.g. 0 for the laptop webcam")
     ap.add_argument("--quality", default="live_low", choices=["live_low", "live_med", "live_high"],
                     help="Device Portal stream quality (lower = less delay)")
-    ap.add_argument("--model", default="yolo11s.pt",
-                    help="yolo11s.pt (accurate, 80 everyday classes), yolo11n.pt (faster), or yolov8s-worldv2.pt (also door/stairs)")
+    ap.add_argument("--model", default="yolo11m.pt",
+                    help="yolo11m.pt (accurate default, 80 everyday classes), yolo11l.pt (highest accuracy), yolo11s.pt / yolo11n.pt (faster/lighter), or yolov8s-worldv2.pt (also door/stairs)")
     ap.add_argument("--imgsz", type=int, default=640)
-    ap.add_argument("--conf", type=float, default=0.15,
-                    help="Confidence threshold (default 0.15 for better detection of cups, TVs, books, and smaller objects)")
+    ap.add_argument("--conf", type=float, default=0.35,
+                    help="Confidence threshold (default 0.35 for sharper detection, filtering out false positives while reliably capturing real objects)")
     ap.add_argument("--remap", default=None,
                     help="Label remapping, e.g. 'refrigerator:shelf' (default: refrigerator -> shelf)")
     ap.add_argument("--device", default=None, help="cpu, 0 for the first NVIDIA GPU (default: auto)")

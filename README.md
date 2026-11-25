@@ -41,7 +41,7 @@ Nama **"By Your Sight"** memiliki makna ganda: *"By Your Side"* (selalu mendampi
 Sistem memadukan **komputasi sensor lokal di HoloLens 2** (untuk navigasi rintangan 0 ms lag) dengan **server laptop AI YOLO** (untuk deteksi objek visual kamera):
 
 ```
-HoloLens 2 Kamera ──(Device Portal Stream)──► detection_server.py (YOLO11s)
+HoloLens 2 Kamera ──(Device Portal Stream)──► detection_server.py (YOLO11m)
                                                       │
                                                 (JSON Detections)
                                                       ▼
@@ -59,7 +59,7 @@ flowchart TD
 
     subgraph AIServer["Laptop Object Detection Server (Python 3.11)"]
         PortalReader["Device Portal / Webcam Stream"]
-        YOLO["YOLO11s Detection Engine (yolo11s.pt)\n• Label Remapping: refrigerator -> shelf\n• Confidence Threshold: 0.15"]
+        YOLO["YOLO11m Detection Engine (yolo11m.pt)\n• Label Remapping: refrigerator -> shelf\n• Confidence Threshold: 0.35"]
         JSONEndpoint["HTTP Server (http://127.0.0.1:8765)\n• /preview.jpg (Live Web UI)\n• /detections (JSON)"]
     end
 
@@ -113,7 +113,7 @@ flowchart TD
 
 ## 4. Setup & Menjalankan AI Detection Server (YOLO)
 
-Server ini bertugas membaca stream kamera, memproses deteksi objek dengan model **YOLO11s**, dan menyediakan API JSON untuk Unity.
+Server ini bertugas membaca stream kamera, memproses deteksi objek dengan model **YOLO11m**, dan menyediakan API JSON untuk Unity.
 
 ### Langkah 1: Setup Lingkungan Python (Sekali Saja)
 
@@ -133,7 +133,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> **Catatan Bobot Model (`yolo11s.pt`):** File model berukuran ±18 MB sudah tersimpan di dalam folder `Tools/ObjectDetectionServer/` sehingga tidak memerlukan unduhan dari internet.
+> **Catatan Bobot Model (`yolo11m.pt`):** File model default berukuran ±39 MB (serta varian `yolo11s.pt` dan `yolo11l.pt`) sudah tersimpan di dalam folder `Tools/ObjectDetectionServer/` sehingga tidak memerlukan unduhan dari internet.
 
 ### Langkah 2: Mengaktifkan Windows Device Portal di HoloLens 2 (Sekali Saja)
 1. Di dalam HoloLens 2: Buka **Settings > Update & Security > For developers**.
@@ -165,7 +165,7 @@ Anda dapat melihat tampilan kamera real-time lengkap dengan kotak deteksi, label
 
 ### Fitur Pintar Server:
 * **Smart Label Remapping:** Label `refrigerator` otomatis diubah menjadi **`shelf`** (rak), mengatasi keterbatasan dataset COCO pada perabot ruangan.
-* **Tuning Confidence (`--conf 0.25`):** Ambang batas deteksi diatur optimal agar buku tertutup dan benda kecil mudah tertangkap.
+* **Tuning Confidence (`--conf 0.35`):** Ambang batas deteksi diatur optimal untuk meningkatkan akurasi dan menekan *false positives* (dapat disesuaikan jika ingin mendeteksi objek kecil/jauh).
 * **Argumen Tambahan:**
   * `--model yolov8s-worldv2.pt` : Mengaktifkan model open-vocabulary (mengenali pintu & tangga).
   * `--device 0` : Menggunakan GPU NVIDIA (jika laptop memilikinya).
@@ -336,4 +336,4 @@ Assets/Scripts/
 | **Suara perintah suara tidak merespon di HoloLens** | Bahasa sistem bukan English (US) atau izin Microphone belum aktif. | Di HoloLens: pastikan **Settings > Time & Language > Speech** tetap diatur ke **English (United States)** (karena ejaan fonetik Bahasa Indonesia dipetakan ke model `en-US`), atau gunakan tombol pintas keyboard `1`–`9` dari laptop saat *Holographic Remoting*. |
 | **Logat suara TTS di Windows terdengar seperti aksen Inggris** | Paket suara *Text-to-speech* Bahasa Indonesia (*Microsoft Andika*) belum diinstal di Windows. | Buka **Windows Settings > Time & Language > Language & Region > Add a language > Bahasa Indonesia** dan centang *Text-to-speech*. |
 | **Objek rak terbaca kulkas (*refrigerator*)** | Dataset standar COCO tidak memiliki kelas `shelf`. | Fitur auto-remapping sudah terpasang di `detection_server.py` (`refrigerator -> shelf`) dan diterjemahkan menjadi **`Rak`** di Unity. |
-| **Preview webcam terasa lambat (FPS rendah)** | Penggunaan model berat atau inferensi CPU. | Model default sudah menggunakan `yolo11s.pt`. Jika laptop memiliki kartu grafis NVIDIA, tambahkan opsi `--device 0`. |
+| **Preview webcam terasa lambat (FPS rendah)** | Penggunaan model berat atau inferensi CPU. | Model default menggunakan `yolo11m.pt` (lebih akurat). Jika ingin inferensi lebih ringan di CPU, gunakan opsi `--model yolo11s.pt`, atau jika laptop memiliki GPU NVIDIA gunakan opsi `--device 0`. |

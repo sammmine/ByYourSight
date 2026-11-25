@@ -23,7 +23,7 @@ namespace ByYourSight.Perception
         public bool enableDetection = true;
         public string serverUrl = "http://127.0.0.1:8765/detections";
         public float pollIntervalSeconds = 0.25f;
-        [Range(0f, 1f)] public float minConfidence = 0.15f;
+        [Range(0f, 1f)] public float minConfidence = 0.35f;
 
         [Header("HoloLens 2 PV Camera Projection")]
         [Tooltip("Horizontal field of view of the HoloLens 2 photo/video camera in the live stream")]
@@ -260,9 +260,6 @@ namespace ByYourSight.Perception
 
         private void OnEnable()
         {
-            // Ensure Unity accepts low-confidence detections (cups, TVs, laptops on live_low stream)
-            if (minConfidence > 0.15f)
-                minConfidence = 0.15f;
             if (missesBeforeRemoval < 60)
                 missesBeforeRemoval = 60;
 #if UNITY_EDITOR || UNITY_STANDALONE
@@ -558,7 +555,7 @@ namespace ByYourSight.Perception
 
             HashSet<TrackedDetection> matched = new HashSet<TrackedDetection>();
             List<string> labels = new List<string>();
-            float confThreshold = Mathf.Min(minConfidence, 0.15f);
+            float confThreshold = minConfidence;
             float batchTime = Time.time;
             _lastNonEmptyBatchTime = batchTime;
 
